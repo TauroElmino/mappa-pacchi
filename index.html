@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mappatura Pacchi - Versione 2.0</title>
+  <title>Mappatura Pacchi - Versione 3.0</title>
   
-  <!-- Leaflet CSS (Mappa OpenSource Gratuita) -->
+  <!-- Leaflet CSS (Mappa OpenSource) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   
   <style>
@@ -37,7 +37,7 @@
 </head>
 <body>
 
-  <header>📦 Mappatura Pacchi — Versione 2.0</header>
+  <header>📦 Mappatura Pacchi — Versione 3.0</header>
 
   <div id="controls">
     <button id="btn-toggle-cam" class="btn">📷 Avvia / Chiudi Fotocamera</button>
@@ -47,14 +47,13 @@
     </div>
 
     <div class="input-group">
-      <label for="address-input">INDIRIZZO O CODICE RILEVATO:</label>
-      <input type="text" id="address-input" placeholder="Inquadra o digita l'indirizzo qui..." />
+      <label for="address-input">INDIRIZZO (ESTRATTO DA DELIVERY ADDRESS):</label>
+      <input type="text" id="address-input" placeholder="Inquadra il codice o digita qui..." />
     </div>
 
-    <!-- TASTO VERDE DI CONFERMA SEMPRE VISIBILE -->
     <button id="btn-save" class="btn btn-green">📍 CONFERMA E SALVA SU MAPPA</button>
     
-    <div id="status-msg">Stato: Pronto.</div>
+    <div id="status-msg">Stato: In attesa di scansione...</div>
   </div>
 
   <div id="map"></div>
@@ -80,6 +79,25 @@
     const btnSave = document.getElementById('btn-save');
     const statusMsg = document.getElementById('status-msg');
 
+    // Funzione per estrarre l'indirizzo sotto "Delivery Address"
+    function extractDeliveryAddress(rawText) {
+      if (!rawText) return "";
+
+      // Cerca pattern come "Delivery Address", "Delivery Address:", "Address:", "Indirizzo:"
+      const regex = /(?:delivery\s*address|shipping\s*address|address|destinazione|indirizzo)[\s:-]*([\s\S]+)/i;
+      const match = rawText.match(regex);
+
+      if (match && match[1]) {
+        // Prende il testo subito dopo la parola chiave
+        let extracted = match[1].trim();
+        // Se ci sono più righe, prende le prime righe utili pulendo eventuali spazi doppi
+        return extracted.split("\n").slice(0, 2).join(", ").trim();
+      }
+
+      // Se non trova l'etichetta specifica, restituisce tutto il testo scansionato
+      return rawText.trim();
+    }
+
     // 2. Gestione Fotocamera
     btnToggleCam.addEventListener('click', () => {
       if (isScanning) {
@@ -95,13 +113,15 @@
       btnToggleCam.innerText = "⏹️ Chiudi Fotocamera";
       btnToggleCam.classList.add('btn-red');
       isScanning = true;
-      statusMsg.innerText = "Fotocamera attiva. Inquadra il codice.";
+      statusMsg.innerText = "Fotocamera attiva. Inquadra il codice/etichetta.";
 
       codeReader.decodeFromVideoDevice(undefined, 'video', (result, err) => {
         if (result) {
-          // Inserisce il testo rilevato direttamente nella casella di testo
-          addressInput.value = result.getText();
-          statusMsg.innerText = "✅ Codice letto! Premi il tasto verde per confermare.";
+          const rawText = result.getText();
+          const cleanAddress = extractDeliveryAddress(rawText);
+
+          addressInput.value = cleanAddress;
+          statusMsg.innerText = "✅ Indirizzo individuato! Premi il tasto verde.";
         }
       }).catch(err => {
         console.error(err);
@@ -148,9 +168,9 @@
           map.setView([lat, lon], 14);
 
           statusMsg.innerText = "🎉 Pacco posizionato con successo!";
-          addressInput.value = ""; // Svuota il campo per il prossimo pacco
+          addressInput.value = ""; // Svuota per il prossimo pacco
         } else {
-          statusMsg.innerText = "❌ Indirizzo non trovato. Prova a modificarlo nel campo testo.";
+          statusMsg.innerText = "❌ Indirizzo non trovato. Prova a ritoccarlo nel campo testo.";
         }
       } catch (error) {
         console.error(error);
