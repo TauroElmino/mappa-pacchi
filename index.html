@@ -3,323 +3,156 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mappatura & Itinerario Consegne</title>
+  <title>Mappa Pacchi - Smistamento Magazzino</title>
   
-  <!-- CSS Leaflet (Mappe Open Source Gratuite) -->
+  <!-- Leaflet CSS (Mappa) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-    }
-    #header {
-      background: #1e293b;
-      color: white;
-      padding: 10px 15px;
-      text-align: center;
-    }
-    #controls {
-      padding: 10px;
-      background: #f1f5f9;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      max-height: 45vh;
-      overflow-y: auto;
-    }
-    #video-container {
-      position: relative;
-      width: 100%;
-      max-width: 400px;
-      margin: 0 auto;
-      display: none;
-    }
-    video {
-      width: 100%;
-      border-radius: 8px;
-    }
-    #map {
-      flex: 1;
-      width: 100%;
-      min-height: 250px;
-    }
-    .btn {
-      background: #2563eb;
-      color: white;
-      border: none;
-      padding: 12px;
-      font-size: 15px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: bold;
-    }
-    .btn-capture { background: #059669; }
-    .btn-stop { background: #dc2626; }
-    .btn-nav { background: #ea580c; font-size: 16px; margin-top: 5px; }
-    .btn-clear { background: #64748b; font-size: 12px; padding: 6px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f6f9; color: #333; height: 100vh; display: flex; flex-direction: column; }
     
-    #status {
-      font-size: 13px;
-      color: #334155;
-      font-weight: bold;
-      word-break: break-word;
-    }
-    #manual-input {
-      display: flex;
-      gap: 5px;
-    }
-    #manual-input input {
-      flex: 1;
-      padding: 8px;
-      font-size: 14px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-    #stops-list {
-      background: white;
-      border: 1px solid #cbd5e1;
-      border-radius: 6px;
-      padding: 8px;
-      max-height: 120px;
-      overflow-y: auto;
-    }
-    .stop-item {
-      font-size: 13px;
-      padding: 4px 0;
-      border-bottom: 1px solid #f1f5f9;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
+    header { background: #1e293b; color: #fff; padding: 12px 16px; text-align: center; font-size: 1.1rem; font-weight: bold; }
+    
+    #controls { padding: 12px; background: #fff; border-bottom: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px; }
+    
+    .btn { background: #2563eb; color: #fff; border: none; padding: 12px 16px; font-size: 1rem; font-weight: bold; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .btn:active { background: #1d4ed8; }
+    .btn-confirm { background: #16a34a; margin-top: 6px; }
+    .btn-confirm:active { background: #15803d; }
+    .btn-confirm:disabled { background: #9ca3af; cursor: not-allowed; }
+    
+    #scanner-container { display: none; position: relative; width: 100%; height: 220px; background: #000; border-radius: 8px; overflow: hidden; }
+    #video { width: 100%; height: 100%; object-fit: cover; }
+    
+    #read-result { font-weight: bold; font-size: 0.95rem; color: #1e293b; background: #f1f5f9; padding: 8px 12px; border-radius: 6px; word-break: break-all; min-height: 38px; display: flex; align-items: center; }
+    
+    #map { flex: 1; width: 100%; }
+    
+    .status-msg { font-size: 0.85rem; color: #64748b; text-align: center; }
   </style>
 </head>
 <body>
 
-  <div id="header">
-    <h3 style="margin:0;">Gestione Consegne & Navigatore</h3>
-  </div>
+  <header>📦 Smistamento Pacchi & Mappatura</header>
 
   <div id="controls">
-    <button id="cameraBtn" class="btn" onclick="toggleCamera()">📷 Apri Fotocamera per Leggere la Via</button>
+    <button id="btn-toggle-cam" class="btn">📷 Apri / Chiudi Fotocamera</button>
     
-    <div id="video-container">
-      <video id="webcam" autoplay playsinline></video>
-      <button id="snapBtn" class="btn btn-capture" style="width:100%; margin-top:5px;" onclick="captureAndReadText()">🔍 Scatta e Leggi Via</button>
+    <div id="scanner-container">
+      <video id="video" playsinline></video>
     </div>
 
-    <!-- Inserimento o correzione manuale dell'indirizzo -->
-    <div id="manual-input">
-      <input type="text" id="addressInput" placeholder="Inserisci o correggi l'indirizzo">
-      <button class="btn" onclick="geocodeManual()">Aggiungi</button>
+    <div>
+      <span style="font-size: 0.8rem; color: #64748b; font-weight: bold;">TESTO/INDIRIZZO RILEVATO:</span>
+      <div id="read-result">Inquadra un codice o indirizzo...</div>
     </div>
 
-    <div id="status">Stato: Pronto per scansionare i pacchi.</div>
-
-    <!-- Lista delle tappe salvate -->
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-      <strong>Tappe Consegna (<span id="stop-count">0</span>):</strong>
-      <button class="btn btn-clear" onclick="clearStops()">Svuota Lista</button>
-    </div>
-    <div id="stops-list">Nessun indirizzo aggiunto finora.</div>
-
-    <!-- Pulsante per esportare l'itinerario su Google Maps -->
-    <button class="btn btn-nav" onclick="openGoogleMapsRoute()">🚀 Apri Navigatore Google Maps</button>
+    <button id="btn-save" class="btn btn-confirm" disabled>📍 Salva Posizione e Aggiungi a Mappa</button>
+    <div id="status-msg" class="status-msg"></div>
   </div>
 
-  <!-- Contenitore Mappa -->
   <div id="map"></div>
 
-  <!-- Librerie Gratuite OCR e Mappe -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- Leaflet JS (Mappa) -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- ZXing JS (Lettore Codici / QR) -->
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
 
   <script>
-    const map = L.map('map').setView([45.4642, 9.1900], 10);
+    // Inizializzazione Mappa (Centrata su Italia)
+    const map = L.map('map').setView([45.4642, 9.1900], 6);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    let stream = null;
-    let deliveryStops = []; // Array dove salviamo gli indirizzi confermati
+    let codeReader = null;
+    let isScanning = false;
+    let currentDetectedText = "";
+    const markers = [];
 
-    // 1. Controllo Fotocamera
-    async function toggleCamera() {
-      const container = document.getElementById('video-container');
-      const video = document.getElementById('webcam');
-      const btn = document.getElementById('cameraBtn');
+    const btnToggleCam = document.getElementById('btn-toggle-cam');
+    const scannerContainer = document.getElementById('scanner-container');
+    const readResult = document.getElementById('read-result');
+    const btnSave = document.getElementById('btn-save');
+    const statusMsg = document.getElementById('status-msg');
 
-      if (!stream) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "environment" }
-          });
-          video.srcObject = stream;
-          container.style.display = 'block';
-          btn.innerText = '⏹️ Chiudi Fotocamera';
-          btn.classList.add('btn-stop');
-        } catch (err) {
-          alert("Impossibile accedere alla fotocamera. Verifica i permessi.");
-        }
+    // Toggle Fotocamera
+    btnToggleCam.addEventListener('click', () => {
+      if (isScanning) {
+        stopScanner();
       } else {
-        stopCamera();
+        startScanner();
       }
-    }
+    });
 
-    function stopCamera() {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        stream = null;
-      }
-      document.getElementById('video-container').style.display = 'none';
-      const btn = document.getElementById('cameraBtn');
-      btn.innerText = '📷 Apri Fotocamera per Leggere la Via';
-      btn.classList.remove('btn-stop');
-    }
+    function startScanner() {
+      codeReader = new ZXing.BrowserMultiFormatReader();
+      scannerContainer.style.display = 'block';
+      isScanning = true;
+      statusMsg.innerText = "Fotocamera attiva. Inquadra il codice o indirizzo.";
 
-    // 2. Lettura Testo (OCR)
-    async function captureAndReadText() {
-      const video = document.getElementById('webcam');
-      const status = document.getElementById('status');
-      
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      status.innerText = "⏳ Lettura testo dell'etichetta...";
-
-      try {
-        const worker = await Tesseract.createWorker('ita');
-        const ret = await worker.recognize(canvas);
-        await worker.terminate();
-
-        const fullText = ret.data.text.replace(/\n/g, ' ').trim();
-        if (fullText.length > 0) {
-          document.getElementById('addressInput').value = fullText;
-          geocodeAndAddMarker(fullText);
-        } else {
-          status.innerText = "⚠️ Nessun testo rilevato dall'immagine.";
+      codeReader.decodeFromVideoDevice(undefined, 'video', (result, err) => {
+        if (result) {
+          currentDetectedText = result.getText();
+          readResult.innerText = currentDetectedText;
+          btnSave.disabled = false; // Abilita il tasto di salvataggio
         }
-      } catch (err) {
-        status.innerText = "❌ Errore nella lettura del testo.";
-      }
-    }
-
-    function geocodeManual() {
-      const address = document.getElementById('addressInput').value;
-      if (address) geocodeAndAddMarker(address);
-    }
-
-    // 3. Geocodifica e Salvataggio Tappa
-    function geocodeAndAddMarker(addressText) {
-      const status = document.getElementById('status');
-      status.innerText = `Ricerca: "${addressText}"...`;
-
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressText)}`;
-
-      fetch(url)
-        .then(response => response.json())
-        .then(data => {
-          if (data && data.length > 0) {
-            const lat = parseFloat(data[0].lat);
-            const lon = parseFloat(data[0].lon);
-            const officialName = data[0].display_name;
-
-            // Aggiungi alla mappa Leaflet
-            const stopNumber = deliveryStops.length + 1;
-            const marker = L.marker([lat, lon]).addTo(map);
-            marker.bindPopup(`<b>Tappa #${stopNumber}</b><br>${officialName}`).openPopup();
-            map.setView([lat, lon], 13);
-
-            // Salva nella lista tappe
-            deliveryStops.push({
-              rawAddress: addressText,
-              formattedAddress: officialName,
-              lat: lat,
-              lon: lon
-            });
-
-            updateStopsUI();
-            status.innerText = `✅ Tappa #${stopNumber} aggiunta con successo!`;
-            document.getElementById('addressInput').value = '';
-          } else {
-            status.innerText = `⚠️ Indirizzo non trovato. Prova a correggere la via nel campo testo.`;
-          }
-        })
-        .catch(err => {
-          status.innerText = `❌ Errore durante la geocodifica.`;
-        });
-    }
-
-    // 4. Aggiorna Interfaccia Utente
-    function updateStopsUI() {
-      const listContainer = document.getElementById('stops-list');
-      document.getElementById('stop-count').innerText = deliveryStops.length;
-
-      if (deliveryStops.length === 0) {
-        listContainer.innerHTML = 'Nessun indirizzo aggiunto finora.';
-        return;
-      }
-
-      listContainer.innerHTML = '';
-      deliveryStops.forEach((stop, index) => {
-        const item = document.createElement('div');
-        item.className = 'stop-item';
-        item.innerHTML = `
-          <span><b>#${index + 1}:</b> ${stop.rawAddress}</span>
-          <button style="background:red; color:white; border:none; border-radius:3px;" onclick="removeStop(${index})">✕</button>
-        `;
-        listContainer.appendChild(item);
+      }).catch(err => {
+        console.error(err);
+        statusMsg.innerText = "Errore nell'accesso alla fotocamera.";
       });
     }
 
-    function removeStop(index) {
-      deliveryStops.splice(index, 1);
-      updateStopsUI();
+    function stopScanner() {
+      if (codeReader) {
+        codeReader.reset();
+      }
+      scannerContainer.style.display = 'none';
+      isScanning = false;
+      statusMsg.innerText = "Fotocamera disattivata.";
     }
 
-    function clearStops() {
-      deliveryStops = [];
-      updateStopsUI();
-      document.getElementById('status').innerText = "Lista tappe svuotata.";
-    }
+    // Tasto "Salva Posizione"
+    btnSave.addEventListener('click', async () => {
+      if (!currentDetectedText) return;
 
-    // 5. Apri l'itinerario completo in Google Maps
-    function openGoogleMapsRoute() {
-      if (deliveryStops.length === 0) {
-        alert("Aggiungi almeno una tappa per generare l'itinerario!");
-        return;
+      statusMsg.innerText = "Ricerca posizione sulla mappa...";
+      btnSave.disabled = true;
+
+      try {
+        // Geocodifica con Nominatim (OpenStreetMap)
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(currentDetectedText)}`);
+        const data = await response.json();
+
+        if (data && data.length > 0) {
+          const lat = parseFloat(data[0].lat);
+          const lon = parseFloat(data[0].lon);
+
+          // Aggiungi marker sulla mappa
+          const marker = L.marker([lat, lon]).addTo(map)
+            .bindPopup(`<b>Pacco Mappato</b><br>${currentDetectedText}`)
+            .openPopup();
+          
+          markers.push(marker);
+
+          // Centra la mappa sul nuovo punto
+          map.setView([lat, lon], 13);
+
+          statusMsg.innerText = "✅ Pacco memorizzato e posizionato sulla mappa!";
+          readResult.innerText = "Inquadra un altro codice...";
+          currentDetectedText = "";
+        } else {
+          statusMsg.innerText = "❌ Indirizzo non trovato sulla mappa. Verificare il testo.";
+          btnSave.disabled = false;
+        }
+      } catch (error) {
+        console.error(error);
+        statusMsg.innerText = "⚠️ Errore durante la connessione al servizio mappe.";
+        btnSave.disabled = false;
       }
-
-      // Costruisci il link per Google Maps
-      const origin = encodeURIComponent(deliveryStops[0].rawAddress);
-      const destination = encodeURIComponent(deliveryStops[deliveryStops.length - 1].rawAddress);
-      
-      let waypoints = '';
-      if (deliveryStops.length > 2) {
-        const middleStops = deliveryStops.slice(1, deliveryStops.length - 1);
-        waypoints = '&waypoints=' + middleStops.map(s => encodeURIComponent(s.rawAddress)).join('|');
-      }
-
-      let mapsUrl = '';
-      if (deliveryStops.length === 1) {
-        // Se c'è solo 1 tappa, imposta la navigazione verso quella destinazione
-        mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${origin}`;
-      } else {
-        // Se ci sono più tappe, imposta l'itinerario completo con le tappe intermedie
-        mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypoints}&travelmode=driving`;
-      }
-
-      // Apri l'app Google Maps sul telefono
-      window.open(mapsUrl, '_blank');
-    }
+    });
   </script>
 </body>
 </html>
