@@ -1,1028 +1,248 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LogiHub - Gestione Smistamento e Itinerari</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FontAwesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Leaflet CSS & JS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- Tesseract.js for OCR -->
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mappatura Pacchi - Versione 5.0 (Mirino Visivo)</title>
+  
+  <!-- Leaflet CSS (Mappa OpenSource Gratuita) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f8fafc; color: #0f172a; height: 100vh; display: flex; flex-direction: column; }
+    
+    header { background: #0f172a; color: #38bdf8; padding: 12px; text-align: center; font-size: 1.1rem; font-weight: bold; border-bottom: 2px solid #38bdf8; }
+    
+    #controls { padding: 12px; background: #ffffff; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); z-index: 1000; }
+    
+    .btn { background: #2563eb; color: #ffffff; border: none; padding: 12px; font-size: 0.95rem; font-weight: bold; border-radius: 6px; cursor: pointer; text-align: center; }
+    .btn:active { opacity: 0.9; }
+    
+    .btn-green { background: #16a34a !important; color: #ffffff !important; font-size: 1rem; padding: 14px; margin-top: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+    .btn-red { background: #dc2626 !important; }
+    .btn-ocr { background: #0284c7 !important; color: #fff !important; }
+    
+    #scanner-container { display: none; width: 100%; height: 230px; background: #000; border-radius: 6px; overflow: hidden; position: relative; }
+    #video { width: 100%; height: 100%; object-fit: cover; }
+    
+    /* MIRINO PER EVIDENZIARE LA VIA INQUADRATA */
+    .viewfinder {
+      position: absolute;
+      top: 20%;
+      left: 10%;
+      width: 80%;
+      height: 45%;
+      border: 3px dashed #ef4444;
+      background: rgba(239, 68, 68, 0.15);
+      border-radius: 8px;
+      pointer-events: none;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 4px;
+    }
+    .viewfinder-text {
+      background: #ef4444;
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: bold;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
 
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6;
-        }
-        #map {
-            height: 100%;
-            width: 100%;
-            z-index: 10;
-        }
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-        }
-        /* Custom map pin glow */
-        .leaflet-marker-icon {
-            transition: all 0.2s ease-in-out;
-        }
-        .scanner-laser {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, rgba(239, 68, 68, 0) 0%, rgba(239, 68, 68, 1) 50%, rgba(239, 68, 68, 0) 100%);
-            box-shadow: 0 0 12px #ef4444;
-            animation: scanAnim 2s infinite ease-in-out;
-        }
-        @keyframes scanAnim {
-            0% { top: 5%; }
-            50% { top: 90%; }
-            100% { top: 5%; }
-        }
-    </style>
+    .input-group { display: flex; flex-direction: column; gap: 4px; }
+    label { font-size: 0.8rem; font-weight: bold; color: #475569; }
+    input[type="text"] { width: 100%; padding: 10px; font-size: 1rem; border: 2px solid #cbd5e1; border-radius: 6px; outline: none; }
+    input[type="text"]:focus { border-color: #2563eb; }
+    
+    #status-msg { font-size: 0.85rem; font-weight: bold; color: #1e293b; text-align: center; min-height: 18px; }
+    
+    #map { flex: 1; width: 100%; }
+  </style>
 </head>
-<body class="h-screen flex flex-col md:flex-row overflow-hidden text-slate-800">
+<body>
 
-    <!-- SIDEBAR / NAVIGATION (Mobile Header + Desktop Sidebar) -->
-    <aside class="bg-slate-900 text-white flex-shrink-0 md:w-64 flex flex-col justify-between border-r border-slate-800 z-30">
-        <!-- Logo & Header -->
-        <div>
-            <div class="p-4 flex items-center justify-between border-b border-slate-800">
-                <div class="flex items-center space-x-3">
-                    <div class="bg-blue-600 p-2.5 rounded-xl text-white shadow-lg shadow-blue-500/30">
-                        <i class="fa-solid font-bold fa-boxes-packing text-xl"></i>
-                    </div>
-                    <div>
-                        <h1 class="font-bold text-lg leading-tight tracking-tight">LogiHub Pro</h1>
-                        <p class="text-xs text-slate-400">Smistamento & Itinerari</p>
-                    </div>
-                </div>
-            </div>
+  <header>📦 Mappatura Pacchi — Versione 5.0 (Mirino)</header>
 
-            <!-- Navigation Links -->
-            <nav class="p-3 space-y-1">
-                <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors bg-blue-600 text-white">
-                    <i class="fa-solid fa-chart-pie w-5"></i>
-                    <span>Dashboard & Pacchi</span>
-                </button>
-                <button onclick="switchTab('scanner')" id="nav-scanner" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">
-                    <i class="fa-solid fa-camera-retro w-5 text-amber-400"></i>
-                    <span>Scanner OCR Etichette</span>
-                </button>
-                <button onclick="switchTab('routes')" id="nav-routes" class="nav-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">
-                    <i class="fa-solid fa-route w-5 text-emerald-400"></i>
-                    <span>Giro Consegne</span>
-                </button>
-            </nav>
-        </div>
+  <div id="controls">
+    <button id="btn-toggle-cam" class="btn">📷 Apri / Chiudi Fotocamera</button>
+    
+    <div id="scanner-container">
+      <video id="video" autoplay playsinline></video>
+      
+      <!-- Riquadro rosso visivo -->
+      <div class="viewfinder">
+        <span class="viewfinder-text">Posiziona la via qui dentro</span>
+      </div>
 
-        <!-- System Info & Reset -->
-        <div class="p-4 border-t border-slate-800 bg-slate-950/50">
-            <div class="flex items-center justify-between mb-3 text-xs text-slate-400">
-                <span class="flex items-center"><i class="fa-solid fa-database mr-1.5 text-blue-400"></i> LocalStorage:</span>
-                <span id="storage-status" class="font-semibold text-emerald-400">Attivo</span>
-            </div>
-            <button onclick="confirmResetData()" class="w-full py-2 px-3 bg-slate-800 hover:bg-red-900/40 text-slate-300 hover:text-red-300 rounded-lg text-xs font-medium transition flex items-center justify-center space-x-2 border border-slate-700 hover:border-red-800">
-                <i class="fa-solid fa-trash-can"></i>
-                <span>Reset Archivio</span>
-            </button>
-        </div>
-    </aside>
-
-    <!-- MAIN CONTENT AREA -->
-    <main class="flex-1 flex flex-col h-full overflow-hidden relative">
-
-        <!-- PANEL 1: DASHBOARD & PACKAGE MANAGEMENT -->
-        <section id="tab-dashboard" class="tab-content flex-1 flex flex-col md:flex-row overflow-hidden h-full">
-            
-            <!-- Left Side: Dashboard Stats + Package List -->
-            <div class="w-full md:w-1/2 lg:w-5/12 flex flex-col bg-white border-r border-slate-200 h-full overflow-hidden">
-                
-                <!-- Stat Cards Header -->
-                <div class="p-4 bg-slate-50 border-b border-slate-200 space-y-3 flex-shrink-0">
-                    <div class="flex items-center justify-between">
-                        <h2 class="font-bold text-slate-800 text-lg flex items-center gap-2">
-                            <i class="fa-solid fa-layer-group text-blue-600"></i> Registro Pacchi
-                        </h2>
-                        <button onclick="exportToCSV()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition">
-                            <i class="fa-solid fa-file-excel"></i> Esporta CSV
-                        </button>
-                    </div>
-
-                    <!-- Metrics Grid -->
-                    <div class="grid grid-cols-3 gap-2">
-                        <div class="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm text-center">
-                            <p class="text-xs text-slate-500 font-medium">Totale</p>
-                            <p id="stat-total" class="text-xl font-extrabold text-slate-800">0</p>
-                        </div>
-                        <div class="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm text-center">
-                            <p class="text-xs text-amber-600 font-medium">In Attesa</p>
-                            <p id="stat-pending" class="text-xl font-extrabold text-amber-600">0</p>
-                        </div>
-                        <div class="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm text-center">
-                            <p class="text-xs text-emerald-600 font-medium">In Consegna</p>
-                            <p id="stat-assigned" class="text-xl font-extrabold text-emerald-600">0</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Filters & Search -->
-                <div class="p-3 bg-white border-b border-slate-200 flex flex-wrap gap-2 items-center flex-shrink-0">
-                    <div class="relative flex-1 min-w-[140px]">
-                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                        <input type="text" id="search-input" onkeyup="filterPackages()" placeholder="Cerca ID, Destinatario, Indirizzo..." class="w-full pl-8 pr-3 py-1.5 bg-slate-100 rounded-lg text-xs border border-transparent focus:border-blue-500 focus:bg-white outline-none">
-                    </div>
-                    <select id="zone-filter" onchange="filterPackages()" class="bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-500">
-                        <option value="ALL">Tutte le Zone</option>
-                        <option value="Zona Centro">Zona Centro</option>
-                        <option value="Zona Nord">Zona Nord</option>
-                        <option value="Zona Sud">Zona Sud</option>
-                        <option value="Zona Industriale">Zona Industriale</option>
-                        <option value="Non Assegnato">Non Assegnato</option>
-                    </select>
-                </div>
-
-                <!-- Add Package Form Modal Button / Quick Add -->
-                <div class="p-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center text-xs">
-                    <span class="text-slate-500 font-medium">Elenco Colli Scansionati</span>
-                    <button onclick="toggleManualModal(true)" class="text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1">
-                        <i class="fa-solid fa-plus-circle"></i> Inserisci Manuale
-                    </button>
-                </div>
-
-                <!-- Package List Scrollable -->
-                <div class="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2.5" id="package-list-container">
-                    <!-- Dynamic Items injected here -->
-                </div>
-            </div>
-
-            <!-- Right Side: Interactive Leaflet Map -->
-            <div class="w-full md:w-1/2 lg:w-7/12 h-2/5 md:h-full relative bg-slate-100">
-                <div id="map"></div>
-                <!-- Map Legend Overlay -->
-                <div class="absolute bottom-4 left-4 z-[500] bg-white/90 backdrop-blur-md p-3 rounded-xl shadow-lg border border-slate-200 text-xs space-y-1.5 max-w-xs">
-                    <p class="font-bold text-slate-700 border-b pb-1 mb-1">Legenda Zone Macroscopiche</p>
-                    <div class="flex items-center gap-2">
-                        <span class="w-3 h-3 rounded-full bg-red-500 inline-block"></span>
-                        <span class="text-slate-600">Zona Centro (CAP 001xx / Roma C.)</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="w-3 h-3 rounded-full bg-blue-500 inline-block"></span>
-                        <span class="text-slate-600">Zona Nord (CAP 0013x-0019x)</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span>
-                        <span class="text-slate-600">Zona Sud (CAP 0014x-0017x)</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="w-3 h-3 rounded-full bg-purple-500 inline-block"></span>
-                        <span class="text-slate-600">Zona Industriale / Periferia</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- PANEL 2: OCR CAMERA SCANNER -->
-        <section id="tab-scanner" class="tab-content hidden flex-1 flex-col p-4 overflow-y-auto custom-scrollbar bg-slate-100">
-            <div class="max-w-3xl mx-auto w-full space-y-4">
-                
-                <!-- OCR Header Card -->
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div>
-                        <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
-                            <i class="fa-solid fa-camera text-amber-500"></i> Scanner Ottico Etichette (OCR)
-                        </h2>
-                        <p class="text-xs text-slate-500 mt-1">Inquadra l'indirizzo o il testo dell'etichetta del pacco per l'estrazione e geocodifica automatica.</p>
-                    </div>
-                    <div class="flex items-center gap-2 w-full md:w-auto">
-                        <label class="flex-1 md:flex-none cursor-pointer bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition">
-                            <i class="fa-solid fa-upload"></i> Carica Immagine
-                            <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Camera Viewfinder & Controls -->
-                <div class="bg-slate-900 rounded-2xl overflow-hidden shadow-xl border border-slate-800 relative flex flex-col items-center">
-                    
-                    <!-- Video Container -->
-                    <div class="relative w-full aspect-video max-h-[420px] bg-black flex items-center justify-center overflow-hidden">
-                        <video id="camera-feed" class="w-full h-full object-cover" autoplay playsinline></video>
-                        <canvas id="camera-canvas" class="hidden"></canvas>
-                        
-                        <!-- Optical Viewfinder Overlay -->
-                        <div id="viewfinder" class="absolute inset-8 border-2 border-dashed border-amber-400/70 rounded-xl pointer-events-none flex flex-col justify-between p-3">
-                            <div class="scanner-laser"></div>
-                            <div class="flex justify-between text-amber-400 text-xs font-mono bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm self-start">
-                                <span>MIRINO OCR ATTIVO</span>
-                            </div>
-                            <p class="text-center text-white/80 text-xs bg-black/50 py-1 px-3 rounded-full backdrop-blur-md self-center">
-                                Posiziona l'indirizzo all'interno della cornice
-                            </p>
-                        </div>
-                    </div>
-
-                    <!-- Action Controls Footer -->
-                    <div class="w-full p-4 bg-slate-950 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800">
-                        <div class="flex items-center gap-2">
-                            <button id="btn-toggle-cam" onclick="toggleCamera()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl flex items-center gap-2 transition">
-                                <i class="fa-solid fa-video"></i> Avvia Fotocamera
-                            </button>
-                        </div>
-                        <button id="btn-capture" onclick="captureAndProcess()" disabled class="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-800 disabled:text-slate-600 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-2 transition shadow-lg shadow-amber-500/20">
-                            <i class="fa-solid fa-bolt"></i> Scansiona ed Estrai Testo
-                        </button>
-                    </div>
-                </div>
-
-                <!-- OCR Processing & Result Panel -->
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
-                    <div class="flex items-center justify-between border-b pb-3">
-                        <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
-                            <i class="fa-solid fa-file-lines text-blue-600"></i> Risultati Estrazione Testo
-                        </h3>
-                        <span id="ocr-status-badge" class="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs font-semibold rounded-full">Pronto</span>
-                    </div>
-
-                    <!-- Progress Bar -->
-                    <div id="ocr-progress-container" class="hidden space-y-1.5">
-                        <div class="flex justify-between text-xs text-slate-600">
-                            <span id="ocr-progress-text">Analisi OCR in corso...</span>
-                            <span id="ocr-progress-percent">0%</span>
-                        </div>
-                        <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                            <div id="ocr-progress-bar" class="bg-amber-500 h-full w-0 transition-all duration-200"></div>
-                        </div>
-                    </div>
-
-                    <!-- Extracted Text Area & Form Pre-fill -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-xs font-medium text-slate-600 mb-1">Testo Grezzo Riconosciuto</label>
-                            <textarea id="raw-ocr-text" rows="5" class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-700 outline-none focus:border-blue-500" placeholder="Il testo riconosciuto apparirà qui..."></textarea>
-                        </div>
-                        <div class="space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                            <p class="text-xs font-bold text-slate-700">Anteprima Nuovo Pacco Extracted</p>
-                            <div>
-                                <label class="block text-[11px] text-slate-500">Destinatario</label>
-                                <input type="text" id="ocr-recipient" class="w-full px-2.5 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-800">
-                            </div>
-                            <div>
-                                <label class="block text-[11px] text-slate-500">Indirizzo Rilevato</label>
-                                <input type="text" id="ocr-address" class="w-full px-2.5 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-800">
-                            </div>
-                            <div class="flex gap-2">
-                                <div class="w-1/2">
-                                    <label class="block text-[11px] text-slate-500">CAP</label>
-                                    <input type="text" id="ocr-cap" class="w-full px-2.5 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-800">
-                                </div>
-                                <div class="w-1/2">
-                                    <label class="block text-[11px] text-slate-500">Macro-Zona Assegnata</label>
-                                    <input type="text" id="ocr-zone" readonly class="w-full px-2.5 py-1 bg-slate-200 border border-slate-300 rounded text-xs font-bold text-slate-700">
-                                </div>
-                            </div>
-                            <button onclick="saveOcrPackage()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center justify-center gap-1.5">
-                                <i class="fa-solid fa-check"></i> Salva Pacco in Registro
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-        </section>
-
-        <!-- PANEL 3: COURIER ROUTE GENERATOR -->
-        <section id="tab-routes" class="tab-content hidden flex-1 flex-col p-4 overflow-y-auto custom-scrollbar bg-slate-100">
-            <div class="max-w-4xl mx-auto w-full space-y-4">
-                
-                <!-- Route Header -->
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div>
-                        <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
-                            <i class="fa-solid fa-route text-emerald-600"></i> Creazione Giro Consegne Corriere
-                        </h2>
-                        <p class="text-xs text-slate-500 mt-1">Seleziona una zona per raggruppare i pacchi e calcolare l'itinerario ottimizzato.</p>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <select id="route-zone-select" onchange="generateRouteView()" class="px-3 py-2 bg-slate-100 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-blue-500">
-                            <option value="ALL">Tutte le Zone</option>
-                            <option value="Zona Centro">Zona Centro</option>
-                            <option value="Zona Nord">Zona Nord</option>
-                            <option value="Zona Sud">Zona Sud</option>
-                            <option value="Zona Industriale">Zona Industriale</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Route Summary & Maps Launcher Button -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="bg-emerald-600 text-white p-4 rounded-2xl shadow-md flex flex-col justify-between">
-                        <p class="text-xs font-medium text-emerald-100">Tappe Selezionate</p>
-                        <p id="route-stops-count" class="text-3xl font-extrabold mt-1">0</p>
-                        <p class="text-[11px] text-emerald-200 mt-2">Pronti per la presa in carico</p>
-                    </div>
-
-                    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-                        <p class="text-xs font-medium text-slate-500">Punto di Partenza Hub</p>
-                        <p class="text-xs font-bold text-slate-800 mt-1">Magazzino Centrale Roma (Via Tiburtina 1000)</p>
-                        <p class="text-[11px] text-slate-400 mt-2">Origine automatica itinerario</p>
-                    </div>
-
-                    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center items-center text-center">
-                        <button onclick="openGoogleMapsRoute()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-map-location-dot text-base"></i> Apri In Google Maps
-                        </button>
-                        <p class="text-[10px] text-slate-400 mt-1.5">Apre l'itinerario con fermate multiple</p>
-                    </div>
-                </div>
-
-                <!-- Stops Sequence Table -->
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div class="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                        <h3 class="font-bold text-slate-800 text-sm">Sequenza Consegne Consigliata</h3>
-                        <span class="text-xs text-slate-500">Ordinamento geografico per efficienza</span>
-                    </div>
-
-                    <div class="divide-y divide-slate-100" id="route-stops-list">
-                        <!-- Route stops injected here -->
-                    </div>
-                </div>
-
-            </div>
-        </section>
-
-    </main>
-
-    <!-- MANUAL ADD PACKAGE MODAL -->
-    <div id="manual-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[1000] hidden flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-100 space-y-4">
-            <div class="flex justify-between items-center border-b pb-3">
-                <h3 class="font-bold text-slate-800 text-base flex items-center gap-2">
-                    <i class="fa-solid fa-box text-blue-600"></i> Nuovo Pacco Manuale
-                </h3>
-                <button onclick="toggleManualModal(false)" class="text-slate-400 hover:text-slate-600">
-                    <i class="fa-solid fa-xmark text-lg"></i>
-                </button>
-            </div>
-
-            <form id="manual-package-form" onsubmit="handleManualAdd(event)" class="space-y-3">
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-1">Destinatario / Codice Cliente</label>
-                    <input type="text" id="m-recipient" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-500" placeholder="Es. Mario Rossi">
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-1">Indirizzo di Consegna</label>
-                    <input type="text" id="m-address" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-500" placeholder="Es. Via del Corso 12">
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-700 mb-1">CAP</label>
-                        <input type="text" id="m-cap" required oninput="autoAssignZoneManual()" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-500" placeholder="Es. 00186">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-700 mb-1">Città</label>
-                        <input type="text" id="m-city" required value="Roma" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-500">
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-1">Zona Automatica Rilevata</label>
-                    <input type="text" id="m-zone" readonly class="w-full px-3 py-2 bg-slate-200 border border-slate-300 rounded-xl text-xs font-bold text-slate-700" value="Non Assegnato">
-                </div>
-
-                <div class="pt-2 flex justify-end gap-2">
-                    <button type="button" onclick="toggleManualModal(false)" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl">Annulla</button>
-                    <button type="submit" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md">Salva Pacco</button>
-                </div>
-            </form>
-        </div>
+      <button id="btn-capture" class="btn btn-ocr" style="position: absolute; bottom: 8px; left: 8px; right: 8px; opacity: 0.95; z-index: 10;">🔍 LEGGI VIA INQUADRATA</button>
     </div>
 
-    <script>
-        // --- CONSTANTS & INITIAL DATA ---
-        const WAREHOUSE_HUB = {
-            name: "Hub Centrale Roma",
-            lat: 41.9100,
-            lng: 12.5300,
-            address: "Via Tiburtina 1000, Roma"
-        };
+    <div class="input-group">
+      <label for="address-input">INDIRIZZO RILEVATO / DA MAPPARE:</label>
+      <input type="text" id="address-input" placeholder="Es. Via Giuseppe Acerbi 31 Padova" />
+    </div>
 
-        // Zone colors mapping
-        const ZONE_COLORS = {
-            "Zona Centro": "#ef4444",      // Red
-            "Zona Nord": "#3b82f6",        // Blue
-            "Zona Sud": "#10b981",         // Emerald
-            "Zona Industriale": "#a855f7", // Purple
-            "Non Assegnato": "#64748b"     // Slate
-        };
+    <button id="btn-save" class="btn btn-green">📍 CONFERMA E SALVA SU MAPPA</button>
+    
+    <div id="status-msg">Stato: Inquadra la via nel rettangolo rosso.</div>
+  </div>
 
-        // Mock Initial Packages if LocalStorage is empty
-        const INITIAL_PACKAGES = [
-            {
-                id: "PKG-1001",
-                recipient: "Studio Legale Bianchi",
-                address: "Via del Corso 184",
-                cap: "00186",
-                city: "Roma",
-                zone: "Zona Centro",
-                lat: 41.9038,
-                lng: 12.4795,
-                status: "In Attesa",
-                scannedAt: new Date().toISOString()
-            },
-            {
-                id: "PKG-1002",
-                recipient: "Ristorante Bella Napoli",
-                address: "Via Nazionale 45",
-                cap: "00184",
-                city: "Roma",
-                zone: "Zona Centro",
-                lat: 41.8988,
-                lng: 12.4890,
-                status: "In Attesa",
-                scannedAt: new Date().toISOString()
-            },
-            {
-                id: "PKG-1003",
-                recipient: "Tech Lab Flaminio",
-                address: "Viale Pinturicchio 21",
-                cap: "00196",
-                city: "Roma",
-                zone: "Zona Nord",
-                lat: 41.9280,
-                lng: 12.4680,
-                status: "In Attesa",
-                scannedAt: new Date().toISOString()
-            },
-            {
-                id: "PKG-1004",
-                recipient: "Officina EUR",
-                address: "Viale Europa 110",
-                cap: "00144",
-                city: "Roma",
-                zone: "Zona Sud",
-                lat: 41.8290,
-                lng: 12.4690,
-                status: "In Attesa",
-                scannedAt: new Date().toISOString()
-            },
-            {
-                id: "PKG-1005",
-                recipient: "Logistica Tiburtina",
-                address: "Via Salaria 700",
-                cap: "00138",
-                city: "Roma",
-                zone: "Zona Industriale",
-                lat: 41.9600,
-                lng: 12.5100,
-                status: "In Attesa",
-                scannedAt: new Date().toISOString()
-            }
-        ];
+  <div id="map"></div>
 
-        // State Variables
-        let packages = [];
-        let map = null;
-        let markersGroup = null;
-        let videoStream = null;
-        let isCameraActive = false;
+  <!-- Libreria Mappa Leaflet (Gratuita) -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Libreria Lettura Testo Visivo OCR Tesseract.js (Gratuita) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.min.js"></script>
 
-        // --- STORAGE & ZONE RULE ENGINE ---
-        function loadPackages() {
-            const stored = localStorage.getItem('logihub_packages');
-            if (stored) {
-                try {
-                    packages = JSON.parse(stored);
-                } catch(e) {
-                    packages = [...INITIAL_PACKAGES];
-                }
-            } else {
-                packages = [...INITIAL_PACKAGES];
-                savePackages();
-            }
+  <script>
+    // 1. Inizializzazione Mappa
+    const map = L.map('map').setView([45.4064, 11.8768], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    let stream = null;
+    const video = document.getElementById('video');
+    const btnToggleCam = document.getElementById('btn-toggle-cam');
+    const btnCapture = document.getElementById('btn-capture');
+    const scannerContainer = document.getElementById('scanner-container');
+    const addressInput = document.getElementById('address-input');
+    const btnSave = document.getElementById('btn-save');
+    const statusMsg = document.getElementById('status-msg');
+
+    // 2. Controllo Fotocamera
+    btnToggleCam.addEventListener('click', async () => {
+      if (!stream) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" }
+          });
+          video.srcObject = stream;
+          scannerContainer.style.display = 'block';
+          btnToggleCam.innerText = "⏹️ Chiudi Fotocamera";
+          btnToggleCam.classList.add('btn-red');
+          statusMsg.innerText = "Centra l'indirizzo nel rettangolo rosso.";
+        } catch (err) {
+          alert("Impossibile accedere alla fotocamera.");
         }
+      } else {
+        stopCamera();
+      }
+    });
 
-        function savePackages() {
-            localStorage.setItem('logihub_packages', JSON.stringify(packages));
-            updateDashboardStats();
-            renderPackageList();
-            updateMapMarkers();
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+      scannerContainer.style.display = 'none';
+      btnToggleCam.innerText = "📷 Apri / Chiudi Fotocamera";
+      btnToggleCam.classList.remove('btn-red');
+      statusMsg.innerText = "Fotocamera disattivata.";
+    }
+
+    // 3. Lettura Mirata del Testo dentro il Riquadro Rosso
+    btnCapture.addEventListener('click', async () => {
+      if (!stream) return;
+
+      statusMsg.innerText = "⏳ Lettura della via nel rettangolo...";
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      try {
+        const worker = await Tesseract.createWorker('ita');
+        const ret = await worker.recognize(canvas);
+        await worker.terminate();
+
+        const fullText = ret.data.text;
+        const cleanAddress = parseAddressFromOCR(fullText);
+        
+        if (cleanAddress) {
+          addressInput.value = cleanAddress;
+          statusMsg.innerText = "✅ Via rilevata! Premi il tasto verde per confermare.";
+        } else {
+          statusMsg.innerText = "⚠️ Nessuna via trovata nel rettangolo. Avvicina o centra meglio il testo.";
         }
+      } catch (err) {
+        console.error(err);
+        statusMsg.innerText = "❌ Errore durante la scansione dell'immagine.";
+      }
+    });
 
-        function confirmResetData() {
-            if (confirm("Sei sicuro di voler ripristinare i dati iniziali di esempio? Tutti i nuovi pacchi verranno eliminati.")) {
-                packages = [...INITIAL_PACKAGES];
-                savePackages();
-            }
+    // Filtro per estrarre la via e la città
+    function parseAddressFromOCR(text) {
+      if (!text) return "";
+
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      let foundAddressLines = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Riconosce la via o l'indicazione stradale
+        if (/(via|corso|viale|piazza|piaz|largo|vicolo|strada)/i.test(line)) {
+          foundAddressLines.push(line);
+          // Prende anche la riga con CAP/Città se presente
+          if (i + 1 < lines.length && /\d{5}/.test(lines[i + 1])) {
+            foundAddressLines.push(lines[i + 1]);
+          }
+          break;
         }
+      }
 
-        // Automatic Macro-Zone Classifier based on CAP / Address keywords
-        function classifyZone(cap, address = "") {
-            if (!cap) return "Non Assegnato";
-            const cleanCap = cap.trim();
-            
-            // Roma CAP categorization logic
-            if (["00184", "00185", "00186", "00187", "00118"].includes(cleanCap) || address.toLowerCase().includes("corso") || address.toLowerCase().includes("centro")) {
-                return "Zona Centro";
-            }
-            if (cleanCap.startsWith("0013") || cleanCap.startsWith("0019") || address.toLowerCase().includes("flaminio") || address.toLowerCase().includes("parioli")) {
-                return "Zona Nord";
-            }
-            if (cleanCap.startsWith("0014") || cleanCap.startsWith("0017") || address.toLowerCase().includes("eur") || address.toLowerCase().includes("ostiense")) {
-                return "Zona Sud";
-            }
-            if (cleanCap.startsWith("0015") || cleanCap.startsWith("0012") || address.toLowerCase().includes("salaria") || address.toLowerCase().includes("tiburtina")) {
-                return "Zona Industriale";
-            }
-            return "Zona Centro"; // Default fallback for central metro area
+      if (foundAddressLines.length > 0) {
+        return foundAddressLines.join(" ")
+          .replace(/[^a-zA-Z0-9\s,]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      return "";
+    }
+
+    // 4. Salvataggio su Mappa (Tasto Verde)
+    btnSave.addEventListener('click', async () => {
+      let textToSearch = addressInput.value.trim();
+
+      if (!textToSearch) {
+        statusMsg.innerText = "⚠️ Inserisci o inquadra un indirizzo prima di salvare!";
+        return;
+      }
+
+      statusMsg.innerText = `🔍 Posizionamento sulla mappa...`;
+
+      const query = textToSearch + ", Italia";
+
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+        const data = await response.json();
+
+        if (data && data.length > 0) {
+          const lat = parseFloat(data[0].lat);
+          const lon = parseFloat(data[0].lon);
+
+          L.marker([lat, lon]).addTo(map)
+            .bindPopup(`<b>Pacco Mappato</b><br>${textToSearch}`)
+            .openPopup();
+
+          map.setView([lat, lon], 15);
+
+          statusMsg.innerText = "🎉 Pacco posizionato con successo!";
+          addressInput.value = "";
+        } else {
+          statusMsg.innerText = "❌ Indirizzo non trovato. Modificalo a mano nel campo di testo.";
         }
-
-        // --- MAP FUNCTIONS ---
-        function initMap() {
-            // Center map on Roma Hub
-            map = L.map('map', { zoomControl: false }).setView([WAREHOUSE_HUB.lat, WAREHOUSE_HUB.lng], 12);
-            
-            // Add zoom control top right
-            L.control.zoom({ position: 'topright' }).addTo(map);
-
-            // OpenStreetMap Tiles
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-                attribution: '&copy; OpenStreetMap'
-            }).addTo(map);
-
-            markersGroup = L.layerGroup().addTo(map);
-
-            // Add Warehouse Hub Marker
-            const hubIcon = L.divIcon({
-                className: 'custom-hub-icon',
-                html: `<div style="background-color: #0f172a; color: white; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 3px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.3); font-size: 14px;"><i class="fa-solid fa-warehouse"></i></div>`,
-                iconSize: [32, 32],
-                iconAnchor: [16, 16]
-            });
-            L.marker([WAREHOUSE_HUB.lat, WAREHOUSE_HUB.lng], { icon: hubIcon })
-                .bindPopup(`<b>${WAREHOUSE_HUB.name}</b><br>${WAREHOUSE_HUB.address}`)
-                .addTo(map);
-
-            updateMapMarkers();
-        }
-
-        function updateMapMarkers() {
-            if (!markersGroup) return;
-            markersGroup.clearLayers();
-
-            const selectedZone = document.getElementById('zone-filter')?.value || 'ALL';
-            const searchTerm = document.getElementById('search-input')?.value.toLowerCase() || '';
-
-            packages.forEach(pkg => {
-                // Apply filters
-                if (selectedZone !== 'ALL' && pkg.zone !== selectedZone) return;
-                if (searchTerm && !pkg.recipient.toLowerCase().includes(searchTerm) && !pkg.address.toLowerCase().includes(searchTerm) && !pkg.id.toLowerCase().includes(searchTerm)) return;
-
-                const color = ZONE_COLORS[pkg.zone] || ZONE_COLORS["Non Assegnato"];
-                
-                const customIcon = L.divIcon({
-                    className: 'custom-pkg-icon',
-                    html: `<div style="background-color: ${color}; color: white; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.3); font-size: 11px; font-weight: bold;">
-                            <i class="fa-solid fa-box"></i>
-                           </div>`,
-                    iconSize: [26, 26],
-                    iconAnchor: [13, 13]
-                });
-
-                const marker = L.marker([pkg.lat, pkg.lng], { icon: customIcon });
-                marker.bindPopup(`
-                    <div class="p-1 font-sans">
-                        <span class="text-[10px] font-bold px-2 py-0.5 rounded text-white" style="background-color: ${color}">${pkg.zone}</span>
-                        <h4 class="font-bold text-slate-800 text-xs mt-1.5">${pkg.recipient}</h4>
-                        <p class="text-xs text-slate-600">${pkg.address}, ${pkg.cap}</p>
-                        <p class="text-[10px] text-slate-400 mt-1">ID: ${pkg.id} | Stato: ${pkg.status}</p>
-                    </div>
-                `);
-                markersGroup.addLayer(marker);
-            });
-        }
-
-        // --- DASHBOARD UI & PACKAGE LIST ---
-        function updateDashboardStats() {
-            document.getElementById('stat-total').innerText = packages.length;
-            document.getElementById('stat-pending').innerText = packages.filter(p => p.status === 'In Attesa').length;
-            document.getElementById('stat-assigned').innerText = packages.filter(p => p.status === 'In Consegna').length;
-        }
-
-        function renderPackageList() {
-            const container = document.getElementById('package-list-container');
-            const selectedZone = document.getElementById('zone-filter').value;
-            const searchTerm = document.getElementById('search-input').value.toLowerCase();
-
-            container.innerHTML = '';
-
-            const filtered = packages.filter(pkg => {
-                const matchesZone = (selectedZone === 'ALL' || pkg.zone === selectedZone);
-                const matchesSearch = (!searchTerm || pkg.recipient.toLowerCase().includes(searchTerm) || pkg.address.toLowerCase().includes(searchTerm) || pkg.id.toLowerCase().includes(searchTerm));
-                return matchesZone && matchesSearch;
-            });
-
-            if (filtered.length === 0) {
-                container.innerHTML = `
-                    <div class="text-center py-8 text-slate-400 text-xs">
-                        <i class="fa-solid fa-inbox text-3xl mb-2 block"></i>
-                        Nessun pacco trovato con i filtri correnti.
-                    </div>
-                `;
-                return;
-            }
-
-            filtered.forEach(pkg => {
-                const zoneColor = ZONE_COLORS[pkg.zone] || '#64748b';
-                const isPending = pkg.status === 'In Attesa';
-
-                const card = document.createElement('div');
-                card.className = "bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-slate-300 transition flex items-center justify-between gap-3";
-                card.innerHTML = `
-                    <div class="flex items-start gap-3 min-w-0">
-                        <div class="p-2 rounded-lg text-white font-bold text-xs shrink-0 mt-0.5" style="background-color: ${zoneColor}">
-                            <i class="fa-solid fa-box"></i>
-                        </div>
-                        <div class="min-w-0">
-                            <div class="flex items-center gap-2">
-                                <span class="font-bold text-slate-800 text-xs truncate">${pkg.recipient}</span>
-                                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 shrink-0">${pkg.id}</span>
-                            </div>
-                            <p class="text-xs text-slate-600 truncate mt-0.5"><i class="fa-solid fa-location-dot text-slate-400 mr-1"></i>${pkg.address}, ${pkg.cap}</p>
-                            <div class="flex items-center gap-2 mt-1.5">
-                                <span class="text-[10px] font-semibold px-2 py-0.5 rounded text-white" style="background-color: ${zoneColor}">${pkg.zone}</span>
-                                <span class="text-[10px] ${isPending ? 'text-amber-600 bg-amber-50' : 'text-emerald-600 bg-emerald-50'} font-medium px-2 py-0.5 rounded">${pkg.status}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex flex-col gap-1 shrink-0">
-                        <button onclick="togglePackageStatus('${pkg.id}')" title="Cambia Stato" class="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 transition text-xs">
-                            <i class="fa-solid ${isPending ? 'fa-truck-fast text-emerald-600' : 'fa-clock text-amber-600'}"></i>
-                        </button>
-                        <button onclick="deletePackage('${pkg.id}')" title="Elimina" class="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition text-xs">
-                            <i class="fa-solid fa-trash"></i>
-                        </button>
-                    </div>
-                `;
-                container.appendChild(card);
-            });
-        }
-
-        function filterPackages() {
-            renderPackageList();
-            updateMapMarkers();
-        }
-
-        function togglePackageStatus(id) {
-            const pkg = packages.find(p => p.id === id);
-            if (pkg) {
-                pkg.status = pkg.status === 'In Attesa' ? 'In Consegna' : 'In Attesa';
-                savePackages();
-            }
-        }
-
-        function deletePackage(id) {
-            if (confirm(`Eliminare il pacco ${id}?`)) {
-                packages = packages.filter(p => p.id !== id);
-                savePackages();
-            }
-        }
-
-        // --- MANUAL PACKAGE ADDITION & GEOCODING ---
-        function toggleManualModal(show) {
-            const modal = document.getElementById('manual-modal');
-            if (show) modal.classList.remove('hidden');
-            else modal.classList.add('hidden');
-        }
-
-        function autoAssignZoneManual() {
-            const cap = document.getElementById('m-cap').value;
-            const address = document.getElementById('m-address').value;
-            const zoneInput = document.getElementById('m-zone');
-            zoneInput.value = classifyZone(cap, address);
-        }
-
-        function handleManualAdd(event) {
-            event.preventDefault();
-            const recipient = document.getElementById('m-recipient').value;
-            const address = document.getElementById('m-address').value;
-            const cap = document.getElementById('m-cap').value;
-            const city = document.getElementById('m-city').value;
-            const zone = classifyZone(cap, address);
-
-            // Simple pseudo-geocoding near Roma center with random offsets for visual display
-            const lat = 41.8900 + (Math.random() - 0.5) * 0.08;
-            const lng = 12.4900 + (Math.random() - 0.5) * 0.08;
-
-            const newPkg = {
-                id: `PKG-${Math.floor(1000 + Math.random() * 9000)}`,
-                recipient,
-                address,
-                cap,
-                city,
-                zone,
-                lat,
-                lng,
-                status: "In Attesa",
-                scannedAt: new Date().toISOString()
-            };
-
-            packages.unshift(newPkg);
-            savePackages();
-            toggleManualModal(false);
-            document.getElementById('manual-package-form').reset();
-        }
-
-        // --- OCR & CAMERA SCANNER ---
-        async function toggleCamera() {
-            const video = document.getElementById('camera-feed');
-            const captureBtn = document.getElementById('btn-capture');
-            const toggleBtn = document.getElementById('btn-toggle-cam');
-
-            if (isCameraActive) {
-                // Stop Camera
-                if (videoStream) {
-                    videoStream.getTracks().forEach(track => track.stop());
-                }
-                video.srcObject = null;
-                isCameraActive = false;
-                captureBtn.disabled = true;
-                toggleBtn.innerHTML = `<i class="fa-solid fa-video"></i> Avvia Fotocamera`;
-                toggleBtn.className = "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl flex items-center gap-2 transition";
-            } else {
-                // Start Camera
-                try {
-                    videoStream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-                    });
-                    video.srcObject = videoStream;
-                    isCameraActive = true;
-                    captureBtn.disabled = false;
-                    toggleBtn.innerHTML = `<i class="fa-solid fa-video-slash"></i> Spegni Fotocamera`;
-                    toggleBtn.className = "px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-xl flex items-center gap-2 transition";
-                } catch (err) {
-                    alert("Impossibile accedere alla fotocamera. Verificare i permessi del browser.");
-                }
-            }
-        }
-
-        function handleImageUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                processOCR(e.target.result);
-            };
-            reader.readAsDataURL(file);
-        }
-
-        function captureAndProcess() {
-            const video = document.getElementById('camera-feed');
-            const canvas = document.getElementById('camera-canvas');
-            const ctx = canvas.getContext('2d');
-
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 480;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-            const imageDataUrl = canvas.toDataURL('image/png');
-            processOCR(imageDataUrl);
-        }
-
-        async function processOCR(imageSource) {
-            const progressContainer = document.getElementById('ocr-progress-container');
-            const progressBar = document.getElementById('ocr-progress-bar');
-            const progressText = document.getElementById('ocr-progress-text');
-            const progressPercent = document.getElementById('ocr-progress-percent');
-            const statusBadge = document.getElementById('ocr-status-badge');
-
-            progressContainer.classList.remove('hidden');
-            statusBadge.innerText = "Analisi OCR...";
-            statusBadge.className = "px-2.5 py-1 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full";
-
-            try {
-                const worker = await Tesseract.createWorker('ita');
-                
-                const ret = await worker.recognize(imageSource, {
-                    logger: m => {
-                        if (m.status === 'recognizing text') {
-                            const pct = Math.round((m.progress || 0) * 100);
-                            progressBar.style.width = `${pct}%`;
-                            progressPercent.innerText = `${pct}%`;
-                            progressText.innerText = "Riconoscimento caratteri etichetta...";
-                        }
-                    }
-                });
-
-                const extractedText = ret.data.text;
-                document.getElementById('raw-ocr-text').value = extractedText;
-
-                // Simple NLP Parsing Regex for Address & CAP
-                parseOCRText(extractedText);
-
-                await worker.terminate();
-
-                statusBadge.innerText = "Estrazione Completata";
-                statusBadge.className = "px-2.5 py-1 bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-full";
-            } catch (err) {
-                console.error(err);
-                alert("Errore durante l'elaborazione OCR dell'immagine.");
-                statusBadge.innerText = "Errore OCR";
-                statusBadge.className = "px-2.5 py-1 bg-red-100 text-red-700 text-xs font-semibold rounded-full";
-            } finally {
-                setTimeout(() => {
-                    progressContainer.classList.add('hidden');
-                }, 1500);
-            }
-        }
-
-        function parseOCRText(text) {
-            // RegEx patterns for Italian Addresses & CAP
-            const capMatch = text.match(/\b\d{5}\b/);
-            const addressMatch = text.match(/(Via|Viale|Piazza|Corso|Largo|Vicolo)\s+[A-Za-z0-9\s,.']+/i);
-            const lines = text.split('\n').filter(l => l.trim().length > 0);
-
-            const cap = capMatch ? capMatch[0] : "00186";
-            const address = addressMatch ? addressMatch[0].trim() : (lines[1] || "Via del Corso 1");
-            const recipient = lines[0] ? lines[0].replace(/[^a-zA-Z\s]/g, '').trim() : "Destinatario Generico";
-            const zone = classifyZone(cap, address);
-
-            document.getElementById('ocr-recipient').value = recipient || "Cliente Scansionato";
-            document.getElementById('ocr-address').value = address;
-            document.getElementById('ocr-cap').value = cap;
-            document.getElementById('ocr-zone').value = zone;
-        }
-
-        function saveOcrPackage() {
-            const recipient = document.getElementById('ocr-recipient').value;
-            const address = document.getElementById('ocr-address').value;
-            const cap = document.getElementById('ocr-cap').value;
-            const zone = document.getElementById('ocr-zone').value || classifyZone(cap, address);
-
-            if (!recipient || !address) {
-                alert("Inserisci almeno destinatario ed indirizzo validi.");
-                return;
-            }
-
-            const lat = 41.8900 + (Math.random() - 0.5) * 0.08;
-            const lng = 12.4900 + (Math.random() - 0.5) * 0.08;
-
-            const newPkg = {
-                id: `PKG-${Math.floor(1000 + Math.random() * 9000)}`,
-                recipient,
-                address,
-                cap,
-                city: "Roma",
-                zone,
-                lat,
-                lng,
-                status: "In Attesa",
-                scannedAt: new Date().toISOString()
-            };
-
-            packages.unshift(newPkg);
-            savePackages();
-            alert(`Pacco ${newPkg.id} salvato correttamente per la ${zone}!`);
-            
-            // Clear fields
-            document.getElementById('raw-ocr-text').value = '';
-            document.getElementById('ocr-recipient').value = '';
-            document.getElementById('ocr-address').value = '';
-            document.getElementById('ocr-cap').value = '';
-            document.getElementById('ocr-zone').value = '';
-        }
-
-        // --- ROUTE GENERATION & GOOGLE MAPS ---
-        function generateRouteView() {
-            const selectedZone = document.getElementById('route-zone-select').value;
-            const listContainer = document.getElementById('route-stops-list');
-            const countLabel = document.getElementById('route-stops-count');
-
-            const filtered = packages.filter(p => selectedZone === 'ALL' || p.zone === selectedZone);
-            countLabel.innerText = filtered.length;
-
-            listContainer.innerHTML = '';
-
-            if (filtered.length === 0) {
-                listContainer.innerHTML = `
-                    <div class="p-8 text-center text-slate-400 text-xs">
-                        Nessun pacco presente per la zona selezionata.
-                    </div>
-                `;
-                return;
-            }
-
-            filtered.forEach((pkg, index) => {
-                const zoneColor = ZONE_COLORS[pkg.zone] || '#64748b';
-                const item = document.createElement('div');
-                item.className = "p-3.5 flex items-center justify-between hover:bg-slate-50 transition";
-                item.innerHTML = `
-                    <div class="flex items-center gap-3">
-                        <span class="w-7 h-7 rounded-full bg-slate-800 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                            ${index + 1}
-                        </span>
-                        <div>
-                            <p class="font-bold text-xs text-slate-800">${pkg.recipient}</p>
-                            <p class="text-xs text-slate-600"><i class="fa-solid fa-location-dot text-slate-400 mr-1"></i>${pkg.address}, ${pkg.cap}</p>
-                        </div>
-                    </div>
-                    <span class="text-[10px] font-bold px-2.5 py-1 rounded text-white" style="background-color: ${zoneColor}">
-                        ${pkg.zone}
-                    </span>
-                `;
-                listContainer.appendChild(item);
-            });
-        }
-
-        function openGoogleMapsRoute() {
-            const selectedZone = document.getElementById('route-zone-select').value;
-            const filtered = packages.filter(p => selectedZone === 'ALL' || p.zone === selectedZone);
-
-            if (filtered.length === 0) {
-                alert("Nessun pacco selezionato per il giro consegne.");
-                return;
-            }
-
-            // Google Maps URL with origin and multiple waypoints
-            const origin = encodeURIComponent(WAREHOUSE_HUB.address);
-            const destination = encodeURIComponent(`${filtered[filtered.length - 1].address}, ${filtered[filtered.length - 1].cap} Roma`);
-
-            let waypoints = filtered.slice(0, -1).map(p => encodeURIComponent(`${p.address}, ${p.cap} Roma`)).join('|');
-
-            let mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
-            if (waypoints) {
-                mapsUrl += `&waypoints=${waypoints}`;
-            }
-
-            window.open(mapsUrl, '_blank');
-        }
-
-        // --- CSV EXPORT ---
-        function exportToCSV() {
-            if (packages.length === 0) {
-                alert("Nessun dato da esportare.");
-                return;
-            }
-
-            let csvContent = "data:text/csv;charset=utf-8,";
-            csvContent += "ID;Destinatario;Indirizzo;CAP;Citta;Zona;Stato;DataScansione\n";
-
-            packages.forEach(p => {
-                csvContent += `${p.id};"${p.recipient}";"${p.address}";${p.cap};${p.city};${p.zone};${p.status};${p.scannedAt}\n`;
-            });
-
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", `Report_Smistamento_LogiHub_${new Date().toISOString().slice(0,10)}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-
-        // --- TAB SWITCHING ---
-        function switchTab(tabId) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            document.querySelectorAll('.nav-btn').forEach(el => {
-                el.classList.remove('bg-blue-600', 'text-white');
-                el.classList.add('text-slate-300');
-            });
-
-            const targetTab = document.getElementById(`tab-${tabId}`);
-            const targetNav = document.getElementById(`nav-${tabId}`);
-
-            if (targetTab) targetTab.classList.remove('hidden');
-            if (targetTab && tabId === 'dashboard') targetTab.classList.add('flex');
-            
-            if (targetNav) {
-                targetNav.classList.add('bg-blue-600', 'text-white');
-                targetNav.classList.remove('text-slate-300');
-            }
-
-            if (tabId === 'routes') {
-                generateRouteView();
+      } catch (error) {
+        console.error(error);
+        statusMsg.innerText = "⚠️ Errore di connessione alla mappa.";
       }
     });
   </script>
