@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mappatura Pacchi Logistica (Gratuito)</title>
+  
+  <!-- CSS Leaflet (Mappe Open Source Gratuite) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    #header {
+      background: #1e293b;
+      color: white;
+      padding: 10px 15px;
+      text-align: center;
+    }
+    #controls {
+      padding: 10px;
+      background: #f1f5f9;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #reader {
+      width: 100%;
+      max-width: 400px;
+      margin: 0 auto;
+      display: none;
+    }
+    #map {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+    }
+    .btn {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 12px;
+      font-size: 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .btn-stop {
+      background: #dc2626;
+    }
+    #status {
+      font-size: 14px;
+      color: #334155;
+      margin-top: 5px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="header">
+    <h3 style="margin:0;">Smistamento & Mappatura Pacchi</h3>
+  </div>
+
+  <div id="controls">
+    <button id="scanBtn" class="btn" onclick="toggleScanner()">📷 Avvia Scanner Codice a Barre</button>
+    <div id="reader"></div>
+    <div id="status">Stato: In attesa di scansione...</div>
+  </div>
+
+  <!-- Contenitore della Mappa -->
+  <div id="map"></div>
+
+  <!-- Libreria Scanner HTML5 (Gratuita) -->
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <!-- Libreria Mappe Leaflet (Gratuita) -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // 1. Inizializzazione della Mappa (OpenStreetMap - Gratuita)
+    // Di default centrata sull'Italia (coordinate indicatrici)
+    const map = L.map('map').setView([45.4642, 9.1900], 10);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    let html5QrcodeScanner = null;
+    let isScanning = false;
+
+    // 2. Controllo Attivazione/Disattivazione Fotocamera
+    function toggleScanner() {
+      const readerDiv = document.getElementById('reader');
+      const scanBtn = document.getElementById('scanBtn');
+
+      if (!isScanning) {
+        readerDiv.style.display = 'block';
+        scanBtn.innerText = '⏹️ Ferma Scanner';
+        scanBtn.classList.add('btn-stop');
+        
+        html5QrcodeScanner = new Html5Qrcode("reader");
+        html5QrcodeScanner.start(
+          { facingMode: "environment" }, // Usa la fotocamera posteriore
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 150 } // Formato rettangolare per codici a barre
+          },
+          onScanSuccess,
+          onScanError
+        );
+        isScanning = true;
+      } else {
+        stopScanner();
+      }
+    }
+
+    function stopScanner() {
+      if (html5QrcodeScanner) {
+        html5QrcodeScanner.stop().then(() => {
+          document.getElementById('reader').style.display = 'none';
+          const scanBtn = document.getElementById('scanBtn');
+          scanBtn.innerText = '📷 Avvia Scanner Codice a Barre';
+          scanBtn.classList.remove('btn-stop');
+          isScanning = false;
+        });
+      }
+    }
+
+    // 3. Gestione Scansione Riuscita
+    function onScanSuccess(decodedText, decodedResult) {
+      document.getElementById('status').innerText = `Codice Rilevato: ${decodedText}. Ricerca in corso...`;
+      
+      // Se il codice a barre contiene un indirizzo (es. "Via Roma 10, Milano")
+      // cerchiamo le coordinate con Nominatim (Servizio Geocoding Gratuito)
+      geocodeAndAddMarker(decodedText);
+      
+      // Mettiamo in pausa momentanea per evitare letture doppie istantanee
+      stopScanner();
+    }
+
+    function onScanError(errorMessage) {
+      // Errori di scansione continua ignorati per fluidità
+    }
+
+    // 4. Geocodifica Gratuita e Posizionamento Marker sulla Mappa
+    function geocodeAndAddMarker(address) {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
+
+      fetch(url)
+        .then(response => response.json())
+        .then(data => {
+          if (data && data.length > 0) {
+            const lat = parseFloat(data[0].lat);
+            const lon = parseFloat(data[0].lon);
+
+            // Aggiungi Marker sulla Mappa
+            const marker = L.marker([lat, lon]).addTo(map);
+            marker.bindPopup(`<b>Pacco Scansionato</b><br>${address}`).openPopup();
+
+            // Centra la mappa sul nuovo pacco
+            map.setView([lat, lon], 13);
+
+            document.getElementById('status').innerText = `✅ Pacco mappato con successo: ${address}`;
+          } else {
+            document.getElementById('status').innerText = `⚠️ Indirizzo non trovato per il codice: ${address}`;
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          document.getElementById('status').innerText = `❌ Errore nella geocodifica del pacco.`;
+        });
+    }
+  </script>
+</body>
+</html>
