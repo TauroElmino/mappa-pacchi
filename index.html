@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mappatura Pacchi - Lettore Indirizzi (OCR)</title>
+  <title>Mappatura & Itinerario Consegne</title>
   
   <!-- CSS Leaflet (Mappe Open Source Gratuite) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -29,6 +29,8 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
+      max-height: 45vh;
+      overflow-y: auto;
     }
     #video-container {
       position: relative;
@@ -44,28 +46,26 @@
     #map {
       flex: 1;
       width: 100%;
-      height: 100%;
+      min-height: 250px;
     }
     .btn {
       background: #2563eb;
       color: white;
       border: none;
       padding: 12px;
-      font-size: 16px;
+      font-size: 15px;
       border-radius: 6px;
       cursor: pointer;
       font-weight: bold;
     }
-    .btn-capture {
-      background: #059669;
-    }
-    .btn-stop {
-      background: #dc2626;
-    }
+    .btn-capture { background: #059669; }
+    .btn-stop { background: #dc2626; }
+    .btn-nav { background: #ea580c; font-size: 16px; margin-top: 5px; }
+    .btn-clear { background: #64748b; font-size: 12px; padding: 6px; }
+    
     #status {
-      font-size: 14px;
+      font-size: 13px;
       color: #334155;
-      margin-top: 5px;
       font-weight: bold;
       word-break: break-word;
     }
@@ -80,12 +80,28 @@
       border: 1px solid #ccc;
       border-radius: 4px;
     }
+    #stops-list {
+      background: white;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 8px;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .stop-item {
+      font-size: 13px;
+      padding: 4px 0;
+      border-bottom: 1px solid #f1f5f9;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
   </style>
 </head>
 <body>
 
   <div id="header">
-    <h3 style="margin:0;">Lettura Indirizzo & Mappatura</h3>
+    <h3 style="margin:0;">Gestione Consegne & Navigatore</h3>
   </div>
 
   <div id="controls">
@@ -96,35 +112,43 @@
       <button id="snapBtn" class="btn btn-capture" style="width:100%; margin-top:5px;" onclick="captureAndReadText()">🔍 Scatta e Leggi Via</button>
     </div>
 
-    <!-- Possibilità di inserire o correggere a mano la via -->
+    <!-- Inserimento o correzione manuale dell'indirizzo -->
     <div id="manual-input">
-      <input type="text" id="addressInput" placeholder="Oppure scrivi la via manualmente (es. Via Roma 10, Milano)">
-      <button class="btn" onclick="geocodeManual()">Mappa</button>
+      <input type="text" id="addressInput" placeholder="Inserisci o correggi l'indirizzo">
+      <button class="btn" onclick="geocodeManual()">Aggiungi</button>
     </div>
 
-    <div id="status">Stato: Inquadra l'etichetta del pacco o scrivi l'indirizzo.</div>
+    <div id="status">Stato: Pronto per scansionare i pacchi.</div>
+
+    <!-- Lista delle tappe salvate -->
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <strong>Tappe Consegna (<span id="stop-count">0</span>):</strong>
+      <button class="btn btn-clear" onclick="clearStops()">Svuota Lista</button>
+    </div>
+    <div id="stops-list">Nessun indirizzo aggiunto finora.</div>
+
+    <!-- Pulsante per esportare l'itinerario su Google Maps -->
+    <button class="btn btn-nav" onclick="openGoogleMapsRoute()">🚀 Apri Navigatore Google Maps</button>
   </div>
 
-  <!-- Contenitore della Mappa -->
+  <!-- Contenitore Mappa -->
   <div id="map"></div>
 
-  <!-- Libreria OCR Tesseract.js (Gratuita per leggere il testo dalle foto) -->
+  <!-- Librerie Gratuite OCR e Mappe -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <!-- Libreria Mappe Leaflet (Gratuita) -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    // 1. Inizializzazione Mappa OpenStreetMap
     const map = L.map('map').setView([45.4642, 9.1900], 10);
-
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap'
     }).addTo(map);
 
     let stream = null;
+    let deliveryStops = []; // Array dove salviamo gli indirizzi confermati
 
-    // 2. Controllo Accensione/Spegnimento Fotocamera
+    // 1. Controllo Fotocamera
     async function toggleCamera() {
       const container = document.getElementById('video-container');
       const video = document.getElementById('webcam');
@@ -133,14 +157,14 @@
       if (!stream) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "environment" } // Fotocamera posteriore
+            video: { facingMode: "environment" }
           });
           video.srcObject = stream;
           container.style.display = 'block';
           btn.innerText = '⏹️ Chiudi Fotocamera';
           btn.classList.add('btn-stop');
         } catch (err) {
-          alert("Impossibile accedere alla fotocamera. Verifica i permessi del browser.");
+          alert("Impossibile accedere alla fotocamera. Verifica i permessi.");
         }
       } else {
         stopCamera();
@@ -158,58 +182,47 @@
       btn.classList.remove('btn-stop');
     }
 
-    // 3. Scatto Foto e Riconoscimento del Testo (OCR)
+    // 2. Lettura Testo (OCR)
     async function captureAndReadText() {
       const video = document.getElementById('webcam');
       const status = document.getElementById('status');
       
-      // Creazione canvas temporaneo per la foto
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      status.innerText = "⏳ Lettura del testo dall'etichetta in corso...";
+      status.innerText = "⏳ Lettura testo dell'etichetta...";
 
       try {
-        // Avvia il riconoscimento testo in italiano con Tesseract
         const worker = await Tesseract.createWorker('ita');
         const ret = await worker.recognize(canvas);
         await worker.terminate();
 
-        const fullText = ret.data.text;
-        status.innerText = `Testo letto: "${fullText.replace(/\n/g, ' ')}"`;
-
-        // Pulisce il testo estratto e cerca la via sulla mappa
-        if (fullText.trim().length > 0) {
-          document.getElementById('addressInput').value = fullText.replace(/\n/g, ' ');
+        const fullText = ret.data.text.replace(/\n/g, ' ').trim();
+        if (fullText.length > 0) {
+          document.getElementById('addressInput').value = fullText;
           geocodeAndAddMarker(fullText);
         } else {
-          status.innerText = "⚠️ Nessun testo rilevato. Riprova posizionando meglio l'etichetta.";
+          status.innerText = "⚠️ Nessun testo rilevato dall'immagine.";
         }
       } catch (err) {
-        console.error(err);
-        status.innerText = "❌ Errore durante la lettura del testo dall'immagine.";
+        status.innerText = "❌ Errore nella lettura del testo.";
       }
     }
 
-    // 4. Geocodifica Manuale dal campo di testo
     function geocodeManual() {
       const address = document.getElementById('addressInput').value;
-      if (address) {
-        geocodeAndAddMarker(address);
-      }
+      if (address) geocodeAndAddMarker(address);
     }
 
-    // 5. Cerca le coordinate e posiziona il Marker sulla Mappa
+    // 3. Geocodifica e Salvataggio Tappa
     function geocodeAndAddMarker(addressText) {
       const status = document.getElementById('status');
-      status.innerText = `Cerca posizione per: "${addressText}"...`;
+      status.innerText = `Ricerca: "${addressText}"...`;
 
-      // Pulizia base per aiutare il motore di ricerca
-      const cleanAddress = addressText.trim();
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanAddress)}`;
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressText)}`;
 
       fetch(url)
         .then(response => response.json())
@@ -217,23 +230,95 @@
           if (data && data.length > 0) {
             const lat = parseFloat(data[0].lat);
             const lon = parseFloat(data[0].lon);
+            const officialName = data[0].display_name;
 
-            // Aggiunge il segnaposto sulla mappa
+            // Aggiungi alla mappa Leaflet
+            const stopNumber = deliveryStops.length + 1;
             const marker = L.marker([lat, lon]).addTo(map);
-            marker.bindPopup(`<b>Pacco Mappato</b><br>${data[0].display_name}`).openPopup();
+            marker.bindPopup(`<b>Tappa #${stopNumber}</b><br>${officialName}`).openPopup();
+            map.setView([lat, lon], 13);
 
-            // Centra la mappa sulla via trovata
-            map.setView([lat, lon], 14);
+            // Salva nella lista tappe
+            deliveryStops.push({
+              rawAddress: addressText,
+              formattedAddress: officialName,
+              lat: lat,
+              lon: lon
+            });
 
-            status.innerText = `✅ Trovato e mappato: ${data[0].display_name}`;
+            updateStopsUI();
+            status.innerText = `✅ Tappa #${stopNumber} aggiunta con successo!`;
+            document.getElementById('addressInput').value = '';
           } else {
-            status.innerText = `⚠️ Indirizzo non riconosciuto sulla mappa. Prova a correggerlo nel box testo sopra.`;
+            status.innerText = `⚠️ Indirizzo non trovato. Prova a correggere la via nel campo testo.`;
           }
         })
         .catch(err => {
-          console.error(err);
-          status.innerText = `❌ Errore nella ricerca geografica.`;
+          status.innerText = `❌ Errore durante la geocodifica.`;
         });
+    }
+
+    // 4. Aggiorna Interfaccia Utente
+    function updateStopsUI() {
+      const listContainer = document.getElementById('stops-list');
+      document.getElementById('stop-count').innerText = deliveryStops.length;
+
+      if (deliveryStops.length === 0) {
+        listContainer.innerHTML = 'Nessun indirizzo aggiunto finora.';
+        return;
+      }
+
+      listContainer.innerHTML = '';
+      deliveryStops.forEach((stop, index) => {
+        const item = document.createElement('div');
+        item.className = 'stop-item';
+        item.innerHTML = `
+          <span><b>#${index + 1}:</b> ${stop.rawAddress}</span>
+          <button style="background:red; color:white; border:none; border-radius:3px;" onclick="removeStop(${index})">✕</button>
+        `;
+        listContainer.appendChild(item);
+      });
+    }
+
+    function removeStop(index) {
+      deliveryStops.splice(index, 1);
+      updateStopsUI();
+    }
+
+    function clearStops() {
+      deliveryStops = [];
+      updateStopsUI();
+      document.getElementById('status').innerText = "Lista tappe svuotata.";
+    }
+
+    // 5. Apri l'itinerario completo in Google Maps
+    function openGoogleMapsRoute() {
+      if (deliveryStops.length === 0) {
+        alert("Aggiungi almeno una tappa per generare l'itinerario!");
+        return;
+      }
+
+      // Costruisci il link per Google Maps
+      const origin = encodeURIComponent(deliveryStops[0].rawAddress);
+      const destination = encodeURIComponent(deliveryStops[deliveryStops.length - 1].rawAddress);
+      
+      let waypoints = '';
+      if (deliveryStops.length > 2) {
+        const middleStops = deliveryStops.slice(1, deliveryStops.length - 1);
+        waypoints = '&waypoints=' + middleStops.map(s => encodeURIComponent(s.rawAddress)).join('|');
+      }
+
+      let mapsUrl = '';
+      if (deliveryStops.length === 1) {
+        // Se c'è solo 1 tappa, imposta la navigazione verso quella destinazione
+        mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${origin}`;
+      } else {
+        // Se ci sono più tappe, imposta l'itinerario completo con le tappe intermedie
+        mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypoints}&travelmode=driving`;
+      }
+
+      // Apri l'app Google Maps sul telefono
+      window.open(mapsUrl, '_blank');
     }
   </script>
 </body>
