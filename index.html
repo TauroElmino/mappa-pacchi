@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mappatura Pacchi - Versione 3.0</title>
+  <title>Mappatura Pacchi - Versione 4.0 (OCR Visivo)</title>
   
-  <!-- Leaflet CSS (Mappa OpenSource) -->
+  <!-- Leaflet CSS (Mappa OpenSource Gratuita) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   
   <style>
@@ -21,8 +21,9 @@
     
     .btn-green { background: #16a34a !important; color: #ffffff !important; font-size: 1rem; padding: 14px; margin-top: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
     .btn-red { background: #dc2626 !important; }
+    .btn-ocr { background: #0284c7 !important; color: #fff !important; }
     
-    #scanner-container { display: none; width: 100%; height: 200px; background: #000; border-radius: 6px; overflow: hidden; }
+    #scanner-container { display: none; width: 100%; height: 220px; background: #000; border-radius: 6px; overflow: hidden; position: relative; }
     #video { width: 100%; height: 100%; object-fit: cover; }
     
     .input-group { display: flex; flex-direction: column; gap: 4px; }
@@ -37,144 +38,186 @@
 </head>
 <body>
 
-  <header>📦 Mappatura Pacchi — Versione 3.0</header>
+  <header>📦 Mappatura Pacchi — Versione 4.0 (OCR)</header>
 
   <div id="controls">
-    <button id="btn-toggle-cam" class="btn">📷 Avvia / Chiudi Fotocamera</button>
+    <button id="btn-toggle-cam" class="btn">📷 Apri / Chiudi Fotocamera</button>
     
     <div id="scanner-container">
-      <video id="video" playsinline></video>
+      <video id="video" autoplay playsinline></video>
+      <button id="btn-capture" class="btn btn-ocr" style="position: absolute; bottom: 10px; left: 10px; right: 10px; opacity: 0.9;">🔍 LEGGI INDIRIZZO DALL'ETICHETTA</button>
     </div>
 
     <div class="input-group">
-      <label for="address-input">INDIRIZZO (ESTRATTO DA DELIVERY ADDRESS):</label>
-      <input type="text" id="address-input" placeholder="Inquadra il codice o digita qui..." />
+      <label for="address-input">INDIRIZZO RILEVATO / DA MAPPARE:</label>
+      <input type="text" id="address-input" placeholder="Es. Via Giuseppe Acerbi 31 Padova" />
     </div>
 
+    <!-- TASTO VERDE DI CONFERMA PER LA MAPPA -->
     <button id="btn-save" class="btn btn-green">📍 CONFERMA E SALVA SU MAPPA</button>
     
-    <div id="status-msg">Stato: In attesa di scansione...</div>
+    <div id="status-msg">Stato: Pronto. Inquadra l'etichetta.</div>
   </div>
 
   <div id="map"></div>
 
-  <!-- Librerie Gratuite -->
+  <!-- Libreria Mappa Leaflet (Gratuita) -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <!-- Libreria Lettura Testo Visivo OCR Tesseract.js (Gratuita) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.min.js"></script>
 
   <script>
-    // 1. Inizializzazione Mappa
-    const map = L.map('map').setView([45.4642, 9.1900], 6);
+    // 1. Inizializzazione Mappa (Centrata su Padova e Nord Italia)
+    const map = L.map('map').setView([45.4064, 11.8768], 11);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    let codeReader = null;
-    let isScanning = false;
-
+    let stream = null;
+    const video = document.getElementById('video');
     const btnToggleCam = document.getElementById('btn-toggle-cam');
+    const btnCapture = document.getElementById('btn-capture');
     const scannerContainer = document.getElementById('scanner-container');
     const addressInput = document.getElementById('address-input');
     const btnSave = document.getElementById('btn-save');
     const statusMsg = document.getElementById('status-msg');
 
-    // Funzione per estrarre l'indirizzo sotto "Delivery Address"
-    function extractDeliveryAddress(rawText) {
-      if (!rawText) return "";
-
-      // Cerca pattern come "Delivery Address", "Delivery Address:", "Address:", "Indirizzo:"
-      const regex = /(?:delivery\s*address|shipping\s*address|address|destinazione|indirizzo)[\s:-]*([\s\S]+)/i;
-      const match = rawText.match(regex);
-
-      if (match && match[1]) {
-        // Prende il testo subito dopo la parola chiave
-        let extracted = match[1].trim();
-        // Se ci sono più righe, prende le prime righe utili pulendo eventuali spazi doppi
-        return extracted.split("\n").slice(0, 2).join(", ").trim();
-      }
-
-      // Se non trova l'etichetta specifica, restituisce tutto il testo scansionato
-      return rawText.trim();
-    }
-
-    // 2. Gestione Fotocamera
-    btnToggleCam.addEventListener('click', () => {
-      if (isScanning) {
-        stopScanner();
+    // 2. Controllo Fotocamera
+    btnToggleCam.addEventListener('click', async () => {
+      if (!stream) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" }
+          });
+          video.srcObject = stream;
+          scannerContainer.style.display = 'block';
+          btnToggleCam.innerText = "⏹️ Chiudi Fotocamera";
+          btnToggleCam.classList.add('btn-red');
+          statusMsg.innerText = "Inquadra la sezione DELIVERY ADDRESS dell'etichetta.";
+        } catch (err) {
+          alert("Impossibile accedere alla fotocamera.");
+        }
       } else {
-        startScanner();
+        stopCamera();
       }
     });
 
-    function startScanner() {
-      codeReader = new ZXing.BrowserMultiFormatReader();
-      scannerContainer.style.display = 'block';
-      btnToggleCam.innerText = "⏹️ Chiudi Fotocamera";
-      btnToggleCam.classList.add('btn-red');
-      isScanning = true;
-      statusMsg.innerText = "Fotocamera attiva. Inquadra il codice/etichetta.";
-
-      codeReader.decodeFromVideoDevice(undefined, 'video', (result, err) => {
-        if (result) {
-          const rawText = result.getText();
-          const cleanAddress = extractDeliveryAddress(rawText);
-
-          addressInput.value = cleanAddress;
-          statusMsg.innerText = "✅ Indirizzo individuato! Premi il tasto verde.";
-        }
-      }).catch(err => {
-        console.error(err);
-        statusMsg.innerText = "Errore nell'accesso alla fotocamera.";
-      });
-    }
-
-    function stopScanner() {
-      if (codeReader) {
-        codeReader.reset();
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
       }
       scannerContainer.style.display = 'none';
-      btnToggleCam.innerText = "📷 Avvia / Chiudi Fotocamera";
+      btnToggleCam.innerText = "📷 Apri / Chiudi Fotocamera";
       btnToggleCam.classList.remove('btn-red');
-      isScanning = false;
       statusMsg.innerText = "Fotocamera disattivata.";
     }
 
-    // 3. Salvataggio Manuale con Tasto Verde
+    // 3. Riconoscimento del Testo Visivo (OCR) dallo Scatto
+    btnCapture.addEventListener('click', async () => {
+      if (!stream) return;
+
+      statusMsg.innerText = "⏳ Lettura del testo visivo dall'etichetta...";
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      try {
+        const worker = await Tesseract.createWorker('ita');
+        const ret = await worker.recognize(canvas);
+        await worker.terminate();
+
+        const fullText = ret.data.text;
+        console.log("Testo grezzo OCR:", fullText);
+
+        const cleanAddress = parseAddressFromOCR(fullText);
+        
+        if (cleanAddress) {
+          addressInput.value = cleanAddress;
+          statusMsg.innerText = "✅ Indirizzo estratto! Verificalo e premi il tasto verde.";
+        } else {
+          statusMsg.innerText = "⚠️ Nessun indirizzo valido trovato. Riprova posizionando meglio la fotocamera.";
+        }
+      } catch (err) {
+        console.error(err);
+        statusMsg.innerText = "❌ Errore durante la lettura dell'immagine.";
+      }
+    });
+
+    // Funzione intelligente per pulire e isolare l'indirizzo
+    function parseAddressFromOCR(text) {
+      if (!text) return "";
+
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      let foundAddressLines = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // Cerca linee contenenti parole chiave di vie (Via, Corso, Viale, Piazza, ecc.)
+        if (/(via|corso|viale|piazza|piaz|largo|vicolo|strada)/i.test(line)) {
+          foundAddressLines.push(line);
+          // Prende anche la riga successiva se contiene il CAP o la città (es. 35136 Padova)
+          if (i + 1 < lines.length && /\d{5}/.test(lines[i + 1])) {
+            foundAddressLines.push(lines[i + 1]);
+          }
+          break;
+        }
+      }
+
+      if (foundAddressLines.length > 0) {
+        // Pulisce da caratteri strani di lettura OCR e unisce via e città
+        return foundAddressLines.join(" ")
+          .replace(/[^a-zA-Z0-9\s,]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      return "";
+    }
+
+    // 4. Ricerca Geografica e Posizionamento sulla Mappa (Tasto Verde)
     btnSave.addEventListener('click', async () => {
-      const textToSearch = addressInput.value.trim();
+      let textToSearch = addressInput.value.trim();
 
       if (!textToSearch) {
-        statusMsg.innerText = "⚠️ Inserisci o inquadra un indirizzo prima di salvare!";
+        statusMsg.innerText = "⚠️ Inserisci o acquisisci un indirizzo prima di salvare!";
         return;
       }
 
-      statusMsg.innerText = "🔍 Ricerca posizione sulla mappa...";
+      statusMsg.innerText = `🔍 Ricerca sulla mappa per: "${textToSearch}"...`;
+
+      // Pulizia ulteriore dell'indirizzo per la ricerca geografica
+      const query = textToSearch + ", Italia";
 
       try {
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(textToSearch)}`);
+        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
         const data = await response.json();
 
         if (data && data.length > 0) {
           const lat = parseFloat(data[0].lat);
           const lon = parseFloat(data[0].lon);
 
-          // Aggiunge il segnaposto
-          L.marker([lat, lon]).addTo(map)
+          // Aggiunge il segnaposto (Marker)
+          const marker = L.marker([lat, lon]).addTo(map)
             .bindPopup(`<b>Pacco Mappato</b><br>${textToSearch}`)
             .openPopup();
 
-          // Centra la mappa sulla posizione trovata
-          map.setView([lat, lon], 14);
+          // Centra la mappa con uno zoom ravvicinato (livello 15)
+          map.setView([lat, lon], 15);
 
-          statusMsg.innerText = "🎉 Pacco posizionato con successo!";
-          addressInput.value = ""; // Svuota per il prossimo pacco
+          statusMsg.innerText = "🎉 Pacco posizionato con successo sulla mappa!";
+          addressInput.value = ""; // Svuota il campo per il pacco successivo
         } else {
-          statusMsg.innerText = "❌ Indirizzo non trovato. Prova a ritoccarlo nel campo testo.";
+          statusMsg.innerText = "❌ Indirizzo non trovato sulla mappa. Prova a scriverlo a mano (es. Via Giuseppe Acerbi 31 Padova).";
         }
       } catch (error) {
         console.error(error);
-        statusMsg.innerText = "⚠️ Errore di connessione alla mappa.";
+        statusMsg.innerText = "⚠️ Errore di connessione al servizio di mappatura.";
       }
     });
   </script>
