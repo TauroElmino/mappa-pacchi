@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mappatura Pacchi Logistica (Gratuito)</title>
+  <title>Mappatura Pacchi - Lettore Indirizzi (OCR)</title>
   
   <!-- CSS Leaflet (Mappe Open Source Gratuite) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -30,11 +30,16 @@
       flex-direction: column;
       gap: 10px;
     }
-    #reader {
+    #video-container {
+      position: relative;
       width: 100%;
       max-width: 400px;
       margin: 0 auto;
       display: none;
+    }
+    video {
+      width: 100%;
+      border-radius: 8px;
     }
     #map {
       flex: 1;
@@ -51,6 +56,9 @@
       cursor: pointer;
       font-weight: bold;
     }
+    .btn-capture {
+      background: #059669;
+    }
     .btn-stop {
       background: #dc2626;
     }
@@ -59,32 +67,54 @@
       color: #334155;
       margin-top: 5px;
       font-weight: bold;
+      word-break: break-word;
+    }
+    #manual-input {
+      display: flex;
+      gap: 5px;
+    }
+    #manual-input input {
+      flex: 1;
+      padding: 8px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
     }
   </style>
 </head>
 <body>
 
   <div id="header">
-    <h3 style="margin:0;">Smistamento & Mappatura Pacchi</h3>
+    <h3 style="margin:0;">Lettura Indirizzo & Mappatura</h3>
   </div>
 
   <div id="controls">
-    <button id="scanBtn" class="btn" onclick="toggleScanner()">📷 Avvia Scanner Codice a Barre</button>
-    <div id="reader"></div>
-    <div id="status">Stato: In attesa di scansione...</div>
+    <button id="cameraBtn" class="btn" onclick="toggleCamera()">📷 Apri Fotocamera per Leggere la Via</button>
+    
+    <div id="video-container">
+      <video id="webcam" autoplay playsinline></video>
+      <button id="snapBtn" class="btn btn-capture" style="width:100%; margin-top:5px;" onclick="captureAndReadText()">🔍 Scatta e Leggi Via</button>
+    </div>
+
+    <!-- Possibilità di inserire o correggere a mano la via -->
+    <div id="manual-input">
+      <input type="text" id="addressInput" placeholder="Oppure scrivi la via manualmente (es. Via Roma 10, Milano)">
+      <button class="btn" onclick="geocodeManual()">Mappa</button>
+    </div>
+
+    <div id="status">Stato: Inquadra l'etichetta del pacco o scrivi l'indirizzo.</div>
   </div>
 
   <!-- Contenitore della Mappa -->
   <div id="map"></div>
 
-  <!-- Libreria Scanner HTML5 (Gratuita) -->
-  <script src="https://unpkg.com/html5-qrcode"></script>
+  <!-- Libreria OCR Tesseract.js (Gratuita per leggere il testo dalle foto) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <!-- Libreria Mappe Leaflet (Gratuita) -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    // 1. Inizializzazione della Mappa (OpenStreetMap - Gratuita)
-    // Di default centrata sull'Italia (coordinate indicatrici)
+    // 1. Inizializzazione Mappa OpenStreetMap
     const map = L.map('map').setView([45.4642, 9.1900], 10);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -92,66 +122,94 @@
       attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    let html5QrcodeScanner = null;
-    let isScanning = false;
+    let stream = null;
 
-    // 2. Controllo Attivazione/Disattivazione Fotocamera
-    function toggleScanner() {
-      const readerDiv = document.getElementById('reader');
-      const scanBtn = document.getElementById('scanBtn');
+    // 2. Controllo Accensione/Spegnimento Fotocamera
+    async function toggleCamera() {
+      const container = document.getElementById('video-container');
+      const video = document.getElementById('webcam');
+      const btn = document.getElementById('cameraBtn');
 
-      if (!isScanning) {
-        readerDiv.style.display = 'block';
-        scanBtn.innerText = '⏹️ Ferma Scanner';
-        scanBtn.classList.add('btn-stop');
-        
-        html5QrcodeScanner = new Html5Qrcode("reader");
-        html5QrcodeScanner.start(
-          { facingMode: "environment" }, // Usa la fotocamera posteriore
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 150 } // Formato rettangolare per codici a barre
-          },
-          onScanSuccess,
-          onScanError
-        );
-        isScanning = true;
+      if (!stream) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" } // Fotocamera posteriore
+          });
+          video.srcObject = stream;
+          container.style.display = 'block';
+          btn.innerText = '⏹️ Chiudi Fotocamera';
+          btn.classList.add('btn-stop');
+        } catch (err) {
+          alert("Impossibile accedere alla fotocamera. Verifica i permessi del browser.");
+        }
       } else {
-        stopScanner();
+        stopCamera();
       }
     }
 
-    function stopScanner() {
-      if (html5QrcodeScanner) {
-        html5QrcodeScanner.stop().then(() => {
-          document.getElementById('reader').style.display = 'none';
-          const scanBtn = document.getElementById('scanBtn');
-          scanBtn.innerText = '📷 Avvia Scanner Codice a Barre';
-          scanBtn.classList.remove('btn-stop');
-          isScanning = false;
-        });
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+      document.getElementById('video-container').style.display = 'none';
+      const btn = document.getElementById('cameraBtn');
+      btn.innerText = '📷 Apri Fotocamera per Leggere la Via';
+      btn.classList.remove('btn-stop');
+    }
+
+    // 3. Scatto Foto e Riconoscimento del Testo (OCR)
+    async function captureAndReadText() {
+      const video = document.getElementById('webcam');
+      const status = document.getElementById('status');
+      
+      // Creazione canvas temporaneo per la foto
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      status.innerText = "⏳ Lettura del testo dall'etichetta in corso...";
+
+      try {
+        // Avvia il riconoscimento testo in italiano con Tesseract
+        const worker = await Tesseract.createWorker('ita');
+        const ret = await worker.recognize(canvas);
+        await worker.terminate();
+
+        const fullText = ret.data.text;
+        status.innerText = `Testo letto: "${fullText.replace(/\n/g, ' ')}"`;
+
+        // Pulisce il testo estratto e cerca la via sulla mappa
+        if (fullText.trim().length > 0) {
+          document.getElementById('addressInput').value = fullText.replace(/\n/g, ' ');
+          geocodeAndAddMarker(fullText);
+        } else {
+          status.innerText = "⚠️ Nessun testo rilevato. Riprova posizionando meglio l'etichetta.";
+        }
+      } catch (err) {
+        console.error(err);
+        status.innerText = "❌ Errore durante la lettura del testo dall'immagine.";
       }
     }
 
-    // 3. Gestione Scansione Riuscita
-    function onScanSuccess(decodedText, decodedResult) {
-      document.getElementById('status').innerText = `Codice Rilevato: ${decodedText}. Ricerca in corso...`;
-      
-      // Se il codice a barre contiene un indirizzo (es. "Via Roma 10, Milano")
-      // cerchiamo le coordinate con Nominatim (Servizio Geocoding Gratuito)
-      geocodeAndAddMarker(decodedText);
-      
-      // Mettiamo in pausa momentanea per evitare letture doppie istantanee
-      stopScanner();
+    // 4. Geocodifica Manuale dal campo di testo
+    function geocodeManual() {
+      const address = document.getElementById('addressInput').value;
+      if (address) {
+        geocodeAndAddMarker(address);
+      }
     }
 
-    function onScanError(errorMessage) {
-      // Errori di scansione continua ignorati per fluidità
-    }
+    // 5. Cerca le coordinate e posiziona il Marker sulla Mappa
+    function geocodeAndAddMarker(addressText) {
+      const status = document.getElementById('status');
+      status.innerText = `Cerca posizione per: "${addressText}"...`;
 
-    // 4. Geocodifica Gratuita e Posizionamento Marker sulla Mappa
-    function geocodeAndAddMarker(address) {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
+      // Pulizia base per aiutare il motore di ricerca
+      const cleanAddress = addressText.trim();
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanAddress)}`;
 
       fetch(url)
         .then(response => response.json())
@@ -160,21 +218,21 @@
             const lat = parseFloat(data[0].lat);
             const lon = parseFloat(data[0].lon);
 
-            // Aggiungi Marker sulla Mappa
+            // Aggiunge il segnaposto sulla mappa
             const marker = L.marker([lat, lon]).addTo(map);
-            marker.bindPopup(`<b>Pacco Scansionato</b><br>${address}`).openPopup();
+            marker.bindPopup(`<b>Pacco Mappato</b><br>${data[0].display_name}`).openPopup();
 
-            // Centra la mappa sul nuovo pacco
-            map.setView([lat, lon], 13);
+            // Centra la mappa sulla via trovata
+            map.setView([lat, lon], 14);
 
-            document.getElementById('status').innerText = `✅ Pacco mappato con successo: ${address}`;
+            status.innerText = `✅ Trovato e mappato: ${data[0].display_name}`;
           } else {
-            document.getElementById('status').innerText = `⚠️ Indirizzo non trovato per il codice: ${address}`;
+            status.innerText = `⚠️ Indirizzo non riconosciuto sulla mappa. Prova a correggerlo nel box testo sopra.`;
           }
         })
         .catch(err => {
           console.error(err);
-          document.getElementById('status').innerText = `❌ Errore nella geocodifica del pacco.`;
+          status.innerText = `❌ Errore nella ricerca geografica.`;
         });
     }
   </script>
